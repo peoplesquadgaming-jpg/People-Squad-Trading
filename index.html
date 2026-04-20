@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+    <script>
+      // Prevent bad polyfills from overwriting native fetch and related globals in strict mode
+      (function() {
+        if (typeof window !== 'undefined') {
+          const protect = (prop) => {
+            if (window[prop]) {
+              const original = window[prop];
+              Object.defineProperty(window, prop, {
+                configurable: true,
+                enumerable: true,
+                get() { return original; },
+                set(val) { console.warn(`Blocked attempt to overwrite window.${prop}`); }
+              });
+            }
+          };
+          ['fetch', 'Headers', 'Request', 'Response'].forEach(protect);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
