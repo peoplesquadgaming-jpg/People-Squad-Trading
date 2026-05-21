@@ -20,22 +20,15 @@ const Indicator: React.FC<IndicatorProps> = ({ name, value, status, description,
       transition={{ delay: index * 0.05, duration: 0.4 }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={cn(
-        "glass-panel rounded-xl p-4 flex flex-col gap-2 hover:border-white/10 transition-all duration-300 group relative cursor-help overflow-hidden",
-        status === 'BULLISH' ? "hover:shadow-[0_0_20px_rgba(34,197,94,0.1)]" : 
-        status === 'BEARISH' ? "hover:shadow-[0_0_20px_rgba(239,68,68,0.1)]" : "hover:shadow-[0_0_20px_rgba(59,130,246,0.1)]"
-      )}
+      className="glass-panel rounded-xl p-4 flex flex-col gap-2 hover:border-white/10 transition-colors group relative cursor-help"
     >
-      {/* Micro Grid Background */}
-      <div className="absolute inset-0 grid-bg opacity-5 group-hover:opacity-10 transition-opacity" />
-
-      <span className="text-[10px] font-mono text-slate-500 uppercase tracking-[0.2em] font-bold group-hover:text-slate-400 transition-colors relative z-10">{name}</span>
-      <div className="flex items-center justify-between relative z-10">
-        <span className="text-sm font-mono font-bold text-slate-200 group-hover:text-white transition-colors">{value}</span>
+      <span className="text-[10px] font-mono text-slate-500 uppercase tracking-[0.2em] font-bold group-hover:text-slate-400 transition-colors">{name}</span>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-mono font-bold text-slate-200">{value}</span>
         <span className={cn(
-          "text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-widest transition-all",
-          status === 'BULLISH' ? "bg-green-500/10 text-green-500 border border-green-500/20 glow-green" : 
-          status === 'BEARISH' ? "bg-red-500/10 text-red-500 border border-red-500/20 glow-red" : 
+          "text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-tighter",
+          status === 'BULLISH' ? "bg-green-500/10 text-green-500 border border-green-500/20" : 
+          status === 'BEARISH' ? "bg-red-500/10 text-red-500 border border-red-500/20" : 
           "bg-slate-800/50 text-slate-400 border border-slate-700/30"
         )}>
           {status}

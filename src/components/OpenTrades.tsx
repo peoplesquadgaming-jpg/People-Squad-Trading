@@ -13,6 +13,7 @@ export interface Trade {
   currentPrice: number;
   amount: number;
   maxProfit?: number;
+  lotSize?: number;
 }
 
 interface OpenTradesProps {
@@ -65,7 +66,7 @@ export function OpenTrades({ trades, onCloseTrade }: OpenTradesProps) {
                     <span className="font-bold text-slate-200">{trade.asset}</span>
                   </div>
                   <div className="text-xs text-slate-500 font-mono mt-1">
-                    Entry: {trade.entryPrice > 100 ? trade.entryPrice.toFixed(2) : trade.entryPrice.toFixed(5)} <span className="text-slate-600 mx-1">|</span> Vol: ${trade.amount}
+                    Entry: {trade.entryPrice > 100 ? trade.entryPrice.toFixed(2) : trade.entryPrice.toFixed(5)} <span className="text-slate-600 mx-1">|</span> Vol: ${trade.amount} {trade.lotSize !== undefined ? `(${trade.lotSize.toFixed(2)} Lot)` : ''}
                   </div>
                 </div>
                 

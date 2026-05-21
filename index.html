@@ -5,22 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
     <script>
-      // Prevent bad polyfills from overwriting native fetch and related globals in strict mode
+      // Defensive patch to prevent "Cannot set property fetch which has only a getter" errors
+      // occurring in certain iframe/sandboxed environments.
       (function() {
-        if (typeof window !== 'undefined') {
-          const protect = (prop) => {
-            if (window[prop]) {
-              const original = window[prop];
-              Object.defineProperty(window, prop, {
-                configurable: true,
+        function patch(name) {
+          try {
+            const descriptor = Object.getOwnPropertyDescriptor(window, name);
+            if (descriptor && (!descriptor.writable || !descriptor.set) && descriptor.configurable) {
+              const originalValue = window[name];
+              Object.defineProperty(window, name, {
+                get: function() { return originalValue; },
+                set: function(v) { 
+                  console.warn('Polyfill attempt on persistent window.' + name + ' ignored.'); 
+                  return true;
+                },
                 enumerable: true,
-                get() { return original; },
-                set(val) { console.warn(`Blocked attempt to overwrite window.${prop}`); }
+                configurable: true
               });
             }
-          };
-          ['fetch', 'Headers', 'Request', 'Response'].forEach(protect);
+          } catch (e) {}
         }
+        ['fetch', 'Headers', 'Request', 'Response', 'ReadableStream'].forEach(patch);
       })();
     </script>
   </head>

@@ -12,14 +12,6 @@ interface SettingsModalProps {
   realBalance: number;
   demoBalance: number;
   onUpdateBalance: (type: 'REAL' | 'DEMO', amount: number) => void;
-  autoTradeAssets: string[];
-  onToggleAutoTradeAsset: (asset: string) => void;
-  dailyLossLimit: number;
-  profitTarget: number;
-  onUpdateDailyLossLimit: (val: number) => void;
-  onUpdateProfitTarget: (val: number) => void;
-  autoSignalThreshold: number;
-  onUpdateAutoSignalThreshold: (val: number) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -31,23 +23,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   realBalance,
   demoBalance,
   onUpdateBalance,
-  autoTradeAssets,
-  onToggleAutoTradeAsset,
-  dailyLossLimit,
-  profitTarget,
-  onUpdateDailyLossLimit,
-  onUpdateProfitTarget,
-  autoSignalThreshold,
-  onUpdateAutoSignalThreshold,
 }) => {
-  const [activeTab, setActiveTab] = React.useState<'indicators' | 'autotrade' | 'balance'>('indicators');
+  const [activeTab, setActiveTab] = React.useState<'indicators' | 'balance'>('indicators');
   const [depositAmount, setDepositAmount] = React.useState('1000');
-
-  const assetsList = [
-    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/GBP', 'NZD/USD', 'USD/CHF',
-    'GBP/JPY', 'EUR/JPY', 'BTC/USD', 'ETH/USD', 'LTC/USD', 'XRP/USD',
-    'GOLD', 'SILVER', 'BRENT', 'CRUDE'
-  ];
 
   return (
     <AnimatePresence>
@@ -80,25 +58,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button 
                 onClick={() => setActiveTab('indicators')}
                 className={cn(
-                  "flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-all",
+                  "flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all",
                   activeTab === 'indicators' ? "text-blue-500 border-b-2 border-blue-500" : "text-slate-500 hover:text-slate-300"
                 )}
               >
                 Indicators
               </button>
               <button 
-                onClick={() => setActiveTab('autotrade')}
-                className={cn(
-                  "flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-all",
-                  activeTab === 'autotrade' ? "text-blue-500 border-b-2 border-blue-500" : "text-slate-500 hover:text-slate-300"
-                )}
-              >
-                Auto-Trade
-              </button>
-              <button 
                 onClick={() => setActiveTab('balance')}
                 className={cn(
-                  "flex-1 py-3 text-[10px] font-bold uppercase tracking-widest transition-all",
+                  "flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all",
                   activeTab === 'balance' ? "text-blue-500 border-b-2 border-blue-500" : "text-slate-500 hover:text-slate-300"
                 )}
               >
@@ -139,77 +108,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     })}
                   </div>
                 </>
-              ) : activeTab === 'autotrade' ? (
-                <div className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Auto & AI Settings</div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl">
-                        <label className="text-[10px] text-slate-500 uppercase font-mono tracking-widest block mb-1">Signal Strategy</label>
-                        <label className="text-[9px] text-slate-600 block mb-2 leading-tight">Minimum % confidence for Auto Signals</label>
-                        <input 
-                          type="number"
-                          min="50"
-                          max="99"
-                          value={autoSignalThreshold}
-                          onChange={(e) => onUpdateAutoSignalThreshold(Number(e.target.value))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500/50"
-                        />
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl">
-                        <label className="text-[10px] text-slate-500 uppercase font-mono tracking-widest block mb-1">Daily Loss Limit</label>
-                        <label className="text-[9px] text-slate-600 block mb-2 leading-tight">Stop trading if loss hits limit</label>
-                        <input 
-                          type="number"
-                          value={dailyLossLimit}
-                          onChange={(e) => onUpdateDailyLossLimit(Number(e.target.value))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-rose-500/50"
-                        />
-                      </div>
-                      <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl md:col-span-2 lg:col-span-1">
-                        <label className="text-[10px] text-slate-500 uppercase font-mono tracking-widest block mb-1">Profit Target</label>
-                        <label className="text-[9px] text-slate-600 block mb-2 leading-tight">Stop trading if profit hits target</label>
-                        <input 
-                          type="number"
-                          value={profitTarget}
-                          onChange={(e) => onUpdateProfitTarget(Number(e.target.value))}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:border-emerald-500/50"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Enabled Assets</div>
-                    <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-                      {assetsList.map((assetName) => {
-                        const isEnabled = autoTradeAssets.includes(assetName);
-                        return (
-                          <button
-                            key={assetName}
-                            onClick={() => onToggleAutoTradeAsset(assetName)}
-                            className={cn(
-                              "flex items-center justify-between p-4 rounded-xl border transition-all text-left",
-                              isEnabled 
-                                ? "bg-emerald-600/10 border-emerald-600/50 text-white" 
-                                : "bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700"
-                            )}
-                          >
-                            <span className="font-medium text-sm">{assetName}</span>
-                            <div className={cn(
-                              "w-5 h-5 rounded-full border flex items-center justify-center transition-all shrink-0",
-                              isEnabled 
-                                ? "bg-emerald-600 border-emerald-600 text-white" 
-                                : "border-slate-700 text-transparent"
-                            )}>
-                              <Check className="w-3 h-3" />
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
               ) : (
                 <div className="space-y-6">
                   <div className="grid grid-cols-2 gap-4">

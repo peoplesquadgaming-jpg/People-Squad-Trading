@@ -11,9 +11,9 @@ export interface ClosedTrade {
   exitPrice: number;
   pnl: number;
   closeTime: string;
-  timestamp?: number;
   amount: number;
   closedBy?: 'SL' | 'TP' | 'AI' | 'MANUAL' | 'TS';
+  lotSize?: number;
 }
 
 interface TradingHistoryModalProps {
@@ -274,7 +274,7 @@ export const TradingHistoryModal: React.FC<TradingHistoryModalProps> = ({
                           <div className="text-[10px] text-slate-500 font-mono mt-1 flex items-center gap-1.5 flex-wrap">
                             <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {trade.closeTime}</span>
                             <span className="text-slate-600">|</span>
-                            <span>Vol: ${trade.amount}</span>
+                            <span>Vol: ${trade.amount} {trade.lotSize !== undefined ? `(${trade.lotSize.toFixed(2)} Lot)` : ''}</span>
                             <span className="text-slate-600">|</span>
                             <span className={cn(
                               "px-1.5 py-0.5 rounded border text-[9px] font-bold flex items-center gap-1",
@@ -302,6 +302,18 @@ export const TradingHistoryModal: React.FC<TradingHistoryModalProps> = ({
                         )}>
                           {trade.pnl >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
                           {trade.pnl >= 0 ? '+$' : '-$'}{Math.abs(trade.pnl).toFixed(2)}
+                        </div>
+                        <div className="flex justify-end mt-1">
+                          <div className="h-1 w-16 bg-white/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(Math.abs(trade.pnl / trade.amount) * 200, 100)}%` }}
+                              className={cn(
+                                "h-full rounded-full",
+                                trade.pnl >= 0 ? "bg-emerald-500" : "bg-rose-500"
+                              )}
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>

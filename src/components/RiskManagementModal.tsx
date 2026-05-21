@@ -7,7 +7,7 @@ interface RiskManagementProps {
   isOpen: boolean;
   onClose: () => void;
   currentPrice: number;
-  onExecuteTrade: (params: { type: 'BUY' | 'SELL', stopLoss: number, takeProfit: number, amount: number }) => void;
+  onExecuteTrade: (params: { type: 'BUY' | 'SELL', stopLoss: number, takeProfit: number, amount: number, lotSize: number }) => void;
   balance: number;
   accountType: 'REAL' | 'DEMO';
 }
@@ -23,13 +23,23 @@ export const RiskManagementModal: React.FC<RiskManagementProps> = ({
   const [stopLoss, setStopLoss] = useState((currentPrice * 0.99).toFixed(5));
   const [takeProfit, setTakeProfit] = useState((currentPrice * 1.02).toFixed(5));
   const [amount, setAmount] = useState('100');
+  const [lotSize, setLotSize] = useState('1.00');
   const [isAiAmount, setIsAiAmount] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      const decimals = currentPrice > 5 ? 2 : 5;
+      setStopLoss((currentPrice * 0.99).toFixed(decimals));
+      setTakeProfit((currentPrice * 1.02).toFixed(decimals));
+    }
+  }, [isOpen, currentPrice]);
 
   useEffect(() => {
     if (isAiAmount && isOpen) {
       // Simulate AI calculating an optimal trade amount based on volatility/risk
       const aiCalculated = Math.floor(Math.random() * 400) + 100; // Random amount between 100 and 500
       setAmount(aiCalculated.toString());
+      setLotSize((aiCalculated / 100).toFixed(2));
     }
   }, [isAiAmount, isOpen]);
 
@@ -39,6 +49,7 @@ export const RiskManagementModal: React.FC<RiskManagementProps> = ({
       stopLoss: parseFloat(stopLoss),
       takeProfit: parseFloat(takeProfit),
       amount: parseFloat(amount) || 100,
+      lotSize: parseFloat(lotSize) || 1.00,
     });
     onClose();
   };
@@ -82,7 +93,11 @@ export const RiskManagementModal: React.FC<RiskManagementProps> = ({
                     <input
                       type="number"
                       value={amount}
-                      onChange={(e) => { setAmount(e.target.value); setIsAiAmount(false); }}
+                      onChange={(e) => { 
+                        setAmount(e.target.value); 
+                        setIsAiAmount(false); 
+                        setLotSize((parseFloat(e.target.value) / 100).toFixed(2));
+                      }}
                       disabled={isAiAmount}
                       className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl px-4 py-3 text-white font-mono text-sm focus:border-blue-500/50 outline-none disabled:opacity-50"
                     />
@@ -95,6 +110,82 @@ export const RiskManagementModal: React.FC<RiskManagementProps> = ({
                     >
                       <Bot className="w-3.5 h-3.5" />
                     </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 bg-[#121216]/40 p-3 rounded-2xl border border-white/5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      ⚙️ Lot Position (Forex)
+                    </label>
+                    <span className="text-[11px] font-mono font-black text-blue-400">{parseFloat(lotSize).toFixed(2)} Lot</span>
+                  </div>
+                  
+                  {/* Preset lot values */}
+                  <div className="grid grid-cols-5 gap-1 pt-1">
+                    {[0.10, 1.00, 2.00, 4.00, 5.00].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => {
+                          setLotSize(preset.toFixed(2));
+                          setAmount((preset * 100).toString());
+                          setIsAiAmount(false);
+                        }}
+                        className={cn(
+                          "py-1.5 rounded-lg text-[9px] font-black transition-all",
+                          parseFloat(lotSize) === preset && !isAiAmount
+                            ? "bg-blue-600/20 text-blue-400 border border-blue-500/50"
+                            : "bg-white/5 text-slate-400 border border-transparent hover:bg-white/10"
+                        )}
+                      >
+                        {preset.toFixed(1)} L
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Manual Decimal Step */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={isAiAmount ? '' : lotSize}
+                      placeholder={isAiAmount ? 'AI Lot Size' : '1.00'}
+                      onChange={(e) => {
+                        const val = Math.max(0.01, parseFloat(e.target.value) || 0.01);
+                        setLotSize(val.toString());
+                        setAmount((val * 100).toString());
+                        setIsAiAmount(false);
+                      }}
+                      disabled={isAiAmount}
+                      className="flex-1 bg-slate-900/40 border border-[#1e293b] rounded-xl px-3 py-2 text-white font-mono text-xs focus:border-blue-500/50 outline-none text-right placeholder-slate-600"
+                    />
+
+                    <div className="flex bg-white/5 rounded-lg border border-white/5 overflow-hidden">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const next = Math.max(0.01, parseFloat(lotSize) - 0.1);
+                          setLotSize(next.toFixed(2));
+                          setAmount((next * 100).toString());
+                        }}
+                        className="px-2 py-1 text-slate-400 hover:text-white text-xs font-black"
+                      >
+                        -
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const next = parseFloat(lotSize) + 0.1;
+                          setLotSize(next.toFixed(2));
+                          setAmount((next * 100).toString());
+                        }}
+                        className="px-2 py-1 text-slate-400 hover:text-white text-xs font-black border-l border-white/5"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
 

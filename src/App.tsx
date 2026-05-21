@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { TradingViewChart } from './components/TradingViewChart';
 import { SignalPanel, SignalType } from './components/SignalPanel';
 import { IndicatorGrid, IndicatorData } from './components/IndicatorGrid';
@@ -9,8 +9,9 @@ import { RiskManagementModal } from './components/RiskManagementModal';
 import { PerformanceStats, PerformanceData } from './components/PerformanceStats';
 import { OpenTrades, Trade } from './components/OpenTrades';
 import { TradingHistoryModal, ClosedTrade } from './components/TradingHistoryModal';
-import { DealPanel } from './components/DealPanel';
-import { ShieldAlert, Info, History, Settings, LayoutDashboard, Zap, Bell, Bot, ExternalLink, Globe, User } from 'lucide-react';
+import { AdminPanel } from './components/AdminPanel';
+import { AIAssistant } from './components/AIAssistant';
+import { Shield, ShieldAlert, Info, History, Settings, LayoutDashboard, Zap, Bell, Bot, ExternalLink, Globe, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { generateSignalExplanation } from './services/geminiService';
@@ -20,13 +21,31 @@ interface DataPoint {
   price: number;
 }
 
+const getDurationSeconds = (d: string): number => {
+  const match = d.match(/^(\d+)([MS])$/i);
+  if (match) {
+    const val = parseInt(match[1]);
+    const unit = match[2].toUpperCase();
+    if (unit === 'M') return val * 60;
+    return val;
+  }
+  return 60; // default 60s
+};
+
 export default function App() {
   const [data, setData] = useState<DataPoint[]>([]);
-  const [currentPrice, setCurrentPrice] = useState(1.08450);
+  const [currentPrice, setCurrentPrice] = useState(1.00960);
+  const [signalEntryPrice, setSignalEntryPrice] = useState<number | null>(null);
   const [signal, setSignal] = useState<SignalType>('NEUTRAL');
   const [confidence, setConfidence] = useState(0);
   const [duration, setDuration] = useState('1M');
-  const [timeLeft, setTimeLeft] = useState(60);
+  const [durationMode, setDurationMode] = useState<'1M' | '3M' | '5M'| 'AI_DYNAMIC'>(() => {
+    return (localStorage.getItem('profitSignal_durationMode') as any) || 'AI_DYNAMIC';
+  });
+  const [lotSize, setLotSize] = useState<number>(() => {
+    return Number(localStorage.getItem('profitSignal_lotSize')) || 1.00;
+  });
+  const [timeLeft, setTimeLeft] = useState(30);
   const [isPredicting, setIsPredicting] = useState(false);
   const [predictionType, setPredictionType] = useState<SignalType>('NEUTRAL');
   const [signalExplanation, setSignalExplanation] = useState('');
@@ -38,6 +57,71 @@ export default function App() {
   const [isAlertsOpen, setIsAlertsOpen] = useState(false);
   const [isRiskOpen, setIsRiskOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [aiOptimizationStats, setAiOptimizationStats] = useState({ 
+    boost: 0, 
+    lastUpdate: 'Never', 
+    currentSuccess: 98,
+    isHyperBoost: localStorage.getItem('profitSignal_hyperMode') === 'true'
+  });
+  const lastSignalTime = useRef(Date.now());
+
+  const handleAIOptimize = (stats: any) => {
+    setAiOptimizationStats(prev => ({
+      boost: stats.accuracyBoost,
+      lastUpdate: stats.lastUpdate,
+      currentSuccess: stats.isHyperBoost ? 99.9 : Math.min(99.8, prev.currentSuccess + (stats.isAggressive ? 0.2 : 0.1)),
+      isHyperBoost: stats.isHyperBoost
+    }));
+    
+    // Update underlying engine settings
+    setAdminSettings(prev => ({
+      ...prev,
+      successRate: stats.isHyperBoost ? 99.8 : Math.min(99, prev.successRate + (stats.isAggressive ? 0.5 : 0.2)),
+      neuralIntensity: stats.isHyperBoost ? 100 : Math.min(100, prev.neuralIntensity + (stats.isAggressive ? 5 : 2))
+    }));
+  };
+
+  const calibratePrice = (newPrice: number) => {
+    setCurrentPrice(newPrice);
+    
+    // Smoothly reconstruct the 50 prior historical data points relative to this new price
+    const initialData: DataPoint[] = [];
+    let basePrice = newPrice;
+    const isCryptoOrGold = asset.includes('BTC') || asset === 'GOLD';
+    for (let i = 0; i < 50; i++) {
+      basePrice += (Math.random() - 0.5) * (isCryptoOrGold ? 10 : 0.0002);
+      initialData.push({
+        time: new Date(Date.now() - (50 - i) * 1000).toLocaleTimeString(),
+        price: basePrice
+      });
+    }
+    setData(initialData);
+  };
+
+  // Prevention for stuck prediction state
+  useEffect(() => {
+    if (isPredicting) {
+      const timer = setTimeout(() => setIsPredicting(false), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isPredicting]);
+  const [adminSettings, setAdminSettings] = useState(() => {
+    const saved = localStorage.getItem('profitSignal_adminSettings');
+    return saved ? JSON.parse(saved) : {
+      successRate: 98,
+      signalDelay: 0,
+      autoTradeThreshold: 3,
+      marketBias: 'NEUTRAL',
+      volatility: 50,
+      neuralIntensity: 75,
+      signalFrequency: 5,
+      signalSensitivity: 3,
+      scriptMode: 'NONE',
+      forceNextSignal: 'AUTO',
+      socialProofMode: false
+    };
+  });
   const [isAutoTradeEnabled, setIsAutoTradeEnabled] = useState(() => {
     return localStorage.getItem('profitSignal_autoTrade') === 'true';
   });
@@ -49,12 +133,6 @@ export default function App() {
   });
   const [accountType, setAccountType] = useState<'REAL' | 'DEMO'>(() => {
     return (localStorage.getItem('profitSignal_accountType') as 'REAL' | 'DEMO') || 'DEMO';
-  });
-  const [autoTradeDailyLossLimit, setAutoTradeDailyLossLimit] = useState(() => {
-    return Number(localStorage.getItem('profitSignal_autoTradeDailyLossLimit')) || 500;
-  });
-  const [autoTradeProfitTarget, setAutoTradeProfitTarget] = useState(() => {
-    return Number(localStorage.getItem('profitSignal_autoTradeProfitTarget')) || 1000;
   });
   const [realBalance, setRealBalance] = useState(() => {
     return Number(localStorage.getItem('profitSignal_realBalance')) || 0;
@@ -68,47 +146,7 @@ export default function App() {
   const prevBalanceRef = React.useRef(accountType === 'REAL' ? realBalance : demoBalance);
   const [balanceChange, setBalanceChange] = useState<'up' | 'down' | null>(null);
 
-  const [tradeAmount, setTradeAmount] = useState(100);
-
   const currentBalance = accountType === 'REAL' ? realBalance : demoBalance;
-
-  const [autoTradeAssets, setAutoTradeAssets] = useState<string[]>(() => {
-    const saved = localStorage.getItem('profitSignal_autoTradeAssets');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
-    }
-    return ['EUR/USD', 'GBP/USD', 'BTC/USD']; // Default enabled assets
-  });
-
-  useEffect(() => {
-    localStorage.setItem('profitSignal_autoTradeAssets', JSON.stringify(autoTradeAssets));
-  }, [autoTradeAssets]);
-
-  const toggleAutoTradeAsset = (assetName: string) => {
-    setAutoTradeAssets(prev => 
-      prev.includes(assetName) ? prev.filter(a => a !== assetName) : [...prev, assetName]
-    );
-  };
-
-  const handleManualTrade = (type: 'BUY' | 'SELL') => {
-    const newTrade: Trade = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      asset,
-      type,
-      entryPrice: currentPrice,
-      stopLoss: type === 'BUY' ? currentPrice * 0.99 : currentPrice * 1.01,
-      takeProfit: type === 'BUY' ? currentPrice * 1.02 : currentPrice * 0.98,
-      currentPrice,
-      amount: tradeAmount,
-      maxProfit: 0
-    };
-    setOpenTrades(prev => [newTrade, ...prev]);
-
-    // Also trigger AI signal analysis for feedback if not active
-    if (signal === 'NEUTRAL' && !isPredicting) {
-      generateManualSignal();
-    }
-  };
 
   useEffect(() => {
     if (currentBalance > prevBalanceRef.current) {
@@ -123,11 +161,19 @@ export default function App() {
     prevBalanceRef.current = currentBalance;
   }, [currentBalance]);
 
+  // Set and lock signal entry price when trade signal becomes active
+  useEffect(() => {
+    if (signal !== 'NEUTRAL') {
+      if (signalEntryPrice === null) {
+        setSignalEntryPrice(currentPrice);
+      }
+    } else {
+      setSignalEntryPrice(null);
+    }
+  }, [signal, currentPrice, signalEntryPrice]);
+
   const [isAutoSignalEnabled, setIsAutoSignalEnabled] = useState(() => {
     return localStorage.getItem('profitSignal_autoSignal') !== 'false';
-  });
-  const [autoSignalThreshold, setAutoSignalThreshold] = useState(() => {
-    return Number(localStorage.getItem('profitSignal_autoSignalThreshold')) || 95;
   });
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
   const [activeNotification, setActiveNotification] = useState<PriceAlert | null>(null);
@@ -166,15 +212,15 @@ export default function App() {
       try { return JSON.parse(saved); } catch (e) {}
     }
     return {
-      winRate: 94.2,
-      profitFactor: 3.82,
-      totalTrades: 1245,
-      averageDuration: '5m 12s',
-      netProfit: 45245.50
+      winRate: 68.5,
+      profitFactor: 1.42,
+      totalTrades: 124,
+      averageDuration: '4m 12s',
+      netProfit: 1245.50
     };
   });
 
-  const allIndicatorNames = ['RSI (14)', 'MACD', 'MA (20)', 'MA (50)', 'SMA Cross', 'Stochastic', 'Bollinger', 'AO', 'SRSI'];
+  const allIndicatorNames = ['RSI (14)', 'MACD', 'MA (20)', 'MA (50)', 'Stochastic', 'Bollinger', 'AO', 'SRSI'];
 
   const assets = [
     'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/GBP', 'NZD/USD', 'USD/CHF', 'GBP/JPY', 'EUR/JPY',
@@ -186,10 +232,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('profitSignal_asset', asset);
   }, [asset]);
-
-  useEffect(() => {
-    localStorage.setItem('profitSignal_autoSignalThreshold', String(autoSignalThreshold));
-  }, [autoSignalThreshold]);
 
   useEffect(() => {
     localStorage.setItem('profitSignal_visibleIndicators', JSON.stringify(visibleIndicators));
@@ -224,14 +266,6 @@ export default function App() {
   }, [accountType]);
 
   useEffect(() => {
-    localStorage.setItem('profitSignal_autoTradeDailyLossLimit', String(autoTradeDailyLossLimit));
-  }, [autoTradeDailyLossLimit]);
-
-  useEffect(() => {
-    localStorage.setItem('profitSignal_autoTradeProfitTarget', String(autoTradeProfitTarget));
-  }, [autoTradeProfitTarget]);
-
-  useEffect(() => {
     localStorage.setItem('profitSignal_realBalance', String(realBalance));
   }, [realBalance]);
 
@@ -242,6 +276,34 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('profitSignal_selectedBroker', selectedBroker);
   }, [selectedBroker]);
+
+  useEffect(() => {
+    localStorage.setItem('profitSignal_durationMode', durationMode);
+  }, [durationMode]);
+
+  useEffect(() => {
+    localStorage.setItem('profitSignal_lotSize', String(lotSize));
+  }, [lotSize]);
+
+  // Trend strength calculation (reusable)
+  const trendStrength = useMemo(() => {
+    if (data.length < 15) return 0;
+    const prices = data.map(d => d.price);
+    const lastPrice = prices[prices.length - 1];
+    
+    // Calculate overall trend slope (12 periods)
+    const trendLookback = 12;
+    const startPrice = prices[prices.length - trendLookback];
+    const trendDiff = lastPrice - startPrice;
+    
+    // Calculate micro trend (3 periods) - ultra responsive
+    const microLookback = 3;
+    const microStartPrice = prices[prices.length - microLookback];
+    const microDiff = lastPrice - microStartPrice;
+    
+    // Combined trend strength - heavily weighted towards micro movement
+    return ((trendDiff / lastPrice) * 10000 * 0.3) + ((microDiff / lastPrice) * 10000 * 0.7);
+  }, [data]);
 
   // Calculate indicators based on price data
   const indicators = useMemo((): IndicatorData[] => {
@@ -262,20 +324,28 @@ export default function App() {
     const avgLoss = losses / 14;
     const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
     const rsi = 100 - (100 / (1 + rs));
-    const rsiStatus = rsi > 70 ? 'BEARISH' : rsi < 30 ? 'BULLISH' : 'NEUTRAL';
+    // During trends, indicators must align with momentum
+    let rsiStatus: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    if (trendStrength > 1.5) rsiStatus = 'BULLISH';
+    else if (trendStrength < -1.5) rsiStatus = 'BEARISH';
+    else rsiStatus = rsi > 65 ? 'BEARISH' : rsi < 35 ? 'BULLISH' : 'NEUTRAL';
 
     // MACD (12, 26)
     const ma12 = prices.slice(-12).reduce((a, b) => a + b, 0) / 12;
     const ma26 = prices.slice(-26).reduce((a, b) => a + b, 0) / 26;
     const macd = ma12 - ma26;
-    const macdStatus = macd > 0 ? 'BULLISH' : 'BEARISH';
+    const macdStatus = trendStrength > 1 ? 'BULLISH' : (trendStrength < -1 ? 'BEARISH' : (macd > 0 ? 'BULLISH' : 'BEARISH'));
 
     // Stochastic (14)
     const period14 = prices.slice(-14);
     const low14 = Math.min(...period14);
     const high14 = Math.max(...period14);
     const stochastic = ((lastPrice - low14) / (high14 - low14)) * 100;
-    const stochasticStatus = stochastic > 80 ? 'BEARISH' : stochastic < 20 ? 'BULLISH' : 'NEUTRAL';
+    
+    let stochasticStatus: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    if (trendStrength > 2) stochasticStatus = 'BULLISH';
+    else if (trendStrength < -2) stochasticStatus = 'BEARISH';
+    else stochasticStatus = stochastic > 80 ? 'BEARISH' : stochastic < 20 ? 'BULLISH' : 'NEUTRAL';
 
     // Bollinger Bands (20)
     const ma20 = prices.slice(-20).reduce((a, b) => a + b, 0) / 20;
@@ -283,22 +353,15 @@ export default function App() {
     const stdDev = Math.sqrt(variance);
     const upperBB = ma20 + 2 * stdDev;
     const lowerBB = ma20 - 2 * stdDev;
-    const bbStatus = lastPrice > upperBB ? 'BEARISH' : lastPrice < lowerBB ? 'BULLISH' : 'NEUTRAL';
+    
+    let bbStatus: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+    if (trendStrength > 2) bbStatus = 'BULLISH';
+    else if (trendStrength < -2) bbStatus = 'BEARISH';
+    else bbStatus = lastPrice > upperBB ? 'BEARISH' : lastPrice < lowerBB ? 'BULLISH' : 'NEUTRAL';
 
     // MA 50
     const ma50 = prices.slice(-50).reduce((a, b) => a + b, 0) / 50;
     
-    // SMA Crossover (short=9, long=21)
-    const sma9 = prices.slice(-9).reduce((a, b) => a + b, 0) / 9;
-    const sma21 = prices.slice(-21).reduce((a, b) => a + b, 0) / 21;
-    const prevSma9 = prices.slice(-10, -1).reduce((a, b) => a + b, 0) / 9;
-    const prevSma21 = prices.slice(-22, -1).reduce((a, b) => a + b, 0) / 21;
-    
-    let smaStatus: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
-    if (prevSma9 <= prevSma21 && sma9 > sma21) smaStatus = 'BULLISH';
-    else if (prevSma9 >= prevSma21 && sma9 < sma21) smaStatus = 'BEARISH';
-    else smaStatus = sma9 > sma21 ? 'BULLISH' : 'BEARISH';
-
     const allIndicators: IndicatorData[] = [
       { 
         name: 'RSI (14)', 
@@ -315,20 +378,14 @@ export default function App() {
       { 
         name: 'MA (20)', 
         value: ma20.toFixed(currentPrice > 100 ? 2 : 5), 
-        status: lastPrice > ma20 ? 'BULLISH' : 'BEARISH',
+        status: trendStrength > 1 ? 'BULLISH' : (trendStrength < -1 ? 'BEARISH' : (lastPrice > ma20 ? 'BULLISH' : 'BEARISH')),
         description: '20-period Moving Average. Smooths out price action to identify the short-term trend direction.'
       },
       { 
         name: 'MA (50)', 
         value: ma50.toFixed(currentPrice > 100 ? 2 : 5), 
-        status: lastPrice > ma50 ? 'BULLISH' : 'BEARISH',
+        status: trendStrength > 0.5 ? 'BULLISH' : (trendStrength < -0.5 ? 'BEARISH' : (lastPrice > ma50 ? 'BULLISH' : 'BEARISH')),
         description: '50-period Moving Average. A widely used indicator to identify the medium-term trend and potential support/resistance levels.'
-      },
-      {
-        name: 'SMA Cross',
-        value: `${sma9.toFixed(2)} / ${sma21.toFixed(2)}`,
-        status: smaStatus,
-        description: 'Simple Moving Average Crossover (9/21). Bullish when the fast MA crosses above the slow MA.'
       },
       { 
         name: 'Stochastic', 
@@ -345,7 +402,7 @@ export default function App() {
       { 
         name: 'AO', 
         value: (macd * 0.8).toFixed(5), 
-        status: macd > 0 ? 'BULLISH' : 'BEARISH',
+        status: macdStatus,
         description: 'Awesome Oscillator. Used to measure market momentum and to affirm trends or anticipate reversals.'
       },
       { 
@@ -356,10 +413,11 @@ export default function App() {
       }
     ];
 
+
     return allIndicators;
   }, [data, currentPrice]);
 
-  const displayedIndicators = useMemo(() => {
+  const filteredIndicators = useMemo(() => {
     return indicators.filter(ind => visibleIndicators.includes(ind.name));
   }, [indicators, visibleIndicators]);
 
@@ -407,7 +465,7 @@ export default function App() {
       setTimeLeft(prev => {
         if (prev <= 1) {
           setSignal('NEUTRAL');
-          return 60;
+          return 30;
         }
         return prev - 1;
       });
@@ -419,10 +477,10 @@ export default function App() {
   // Handle asset change
   useEffect(() => {
     const initialData: DataPoint[] = [];
-    let basePrice = asset.includes('USD') ? 1.08450 : asset === 'GOLD' ? 2350.40 : 65000.00;
+    let basePrice = asset.includes('USD') ? 1.00960 : asset === 'GOLD' ? 2350.40 : 65000.00;
     
     // Add some variation based on asset
-    if (asset === 'GBP/USD') basePrice = 1.26500;
+    if (asset === 'GBP/USD') basePrice = 1.34208;
     if (asset === 'USD/JPY') basePrice = 151.20;
     if (asset === 'AUD/USD') basePrice = 0.65400;
     if (asset === 'USD/CAD') basePrice = 1.35800;
@@ -455,12 +513,15 @@ export default function App() {
     const interval = setInterval(() => {
       setCurrentPrice(prev => {
         const isHighValue = asset.includes('BTC') || asset === 'ETH' || asset === 'GOLD' || asset === 'USD/JPY' || asset === 'GBP/JPY' || asset === 'EUR/JPY' || asset === 'BRENT' || asset === 'CRUDE';
-        const step = isHighValue ? (asset.includes('BTC') || asset === 'ETH' ? 2 : 0.01) : 0.0001;
         
-        // Influence price based on signal to make it feel predictive
+        // Base step size modified by volatility setting
+        const volatilityFactor = adminSettings.volatility / 50;
+        const step = (isHighValue ? (asset.includes('BTC') || asset === 'ETH' ? 3 : 0.02) : 0.0002) * volatilityFactor;
+        
+        // Influence price based on signal AND global market bias
         let bias = 0;
-        if (signal === 'BUY') bias = step * 0.7;
-        if (signal === 'SELL') bias = -step * 0.7;
+        if (signal === 'BUY' || adminSettings.marketBias === 'BUY') bias = step * 0.8;
+        if (signal === 'SELL' || adminSettings.marketBias === 'SELL') bias = -step * 0.8;
         
         const change = (Math.random() - 0.5) * step + bias;
         const newPrice = prev + change;
@@ -533,9 +594,9 @@ export default function App() {
           exitPrice: trade.currentPrice,
           pnl,
           closeTime: new Date().toLocaleTimeString(),
-          timestamp: Date.now(),
           amount: trade.amount,
-          closedBy
+          closedBy,
+          lotSize: trade.lotSize
         });
         return false; // Remove from open trades
       }
@@ -593,135 +654,162 @@ export default function App() {
     }
   }, [currentPrice, asset, isAutoTradeEnabled, signal, openTrades]);
 
-  // Check Daily Profit/Loss limits to stop auto-trading
-  useEffect(() => {
-    if (!isAutoTradeEnabled) return;
-
-    const today = new Date().toLocaleDateString();
-    const todaysTrades = tradeHistory.filter(t => {
-      if (!t.timestamp) return false;
-      return new Date(t.timestamp).toLocaleDateString() === today;
-    });
-
-    const dailyPnL = todaysTrades.reduce((acc, t) => acc + t.pnl, 0);
-
-    if (dailyPnL <= -autoTradeDailyLossLimit) {
-      setIsAutoTradeEnabled(false);
-      // Optional: Add notification here
-    } else if (dailyPnL >= autoTradeProfitTarget) {
-      setIsAutoTradeEnabled(false);
-      // Optional: Add notification here
-    }
-  }, [tradeHistory, isAutoTradeEnabled, autoTradeDailyLossLimit, autoTradeProfitTarget]);
-
-  const generateManualSignal = () => {
-    if (signal !== 'NEUTRAL' || isPredicting) return;
+  const generateManualSignal = async () => {
+    if (isPredicting) return;
     
-    // Weighted Signal Engine for >93% Accuracy Goal
-    let totalScore = 0;
-    indicators.forEach(ind => {
-      if (ind.status === 'BULLISH') totalScore += 1;
-      if (ind.status === 'BEARISH') totalScore -= 1;
-      
-      // Bonus for high-conviction states
-      if (ind.name === 'RSI (14)') {
-        const rsiVal = parseFloat(ind.value);
-        if (rsiVal < 25) totalScore += 2;
-        if (rsiVal > 75) totalScore -= 2;
-      }
-      if (ind.name === 'SMA Cross') {
-        totalScore += ind.status === 'BULLISH' ? 2 : -2;
-      }
-    });
+    // Calculate actual signal based on all 8 indicators for max accuracy
+    const bullishCount = indicators.filter(i => i.status === 'BULLISH').length;
+    const bearishCount = indicators.filter(i => i.status === 'BEARISH').length;
     
     let type: SignalType = 'NEUTRAL';
-    if (totalScore >= 3) type = 'BUY';
-    else if (totalScore <= -3) type = 'SELL';
-    else type = Math.random() > 0.5 ? 'BUY' : 'SELL'; // Fallback
+    const bias = adminSettings.marketBias;
+    const threshold = adminSettings.signalSensitivity || 3;
 
-    const calculatedConfidence = Math.min(99, 88 + Math.abs(totalScore) * 1.5 + (Math.random() * 2));
+    // Apply manual market bias if it's not neutral
+    if (bias !== 'NEUTRAL') {
+      type = bias as SignalType;
+    } else {
+      if (bullishCount >= threshold) type = 'BUY';
+      else if (bearishCount >= threshold) type = 'SELL';
+      else if (bullishCount > bearishCount) type = 'BUY';
+      else if (bearishCount > bullishCount) type = 'SELL';
+      else type = 'BUY';
+    }
 
     setPredictionType(type);
     setIsPredicting(true);
     
-    setTimeout(() => {
+    try {
+      // Small artificial delay for "scanning" feel
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      let calculatedDuration = '1M';
+      if (durationMode === 'AI_DYNAMIC') {
+        const options = ['2M', '3M', '4M', '5M', '7M', '10M', '15M'];
+        calculatedDuration = options[Math.floor(Math.random() * options.length)];
+      } else {
+        calculatedDuration = durationMode;
+      }
+
       setSignal(type);
-      setConfidence(Math.floor(calculatedConfidence));
-      setTimeLeft(60);
+      const conf = adminSettings.successRate + Math.floor(Math.random() * 2); 
+      setConfidence(conf);
+      setDuration(calculatedDuration);
+      setTimeLeft(getDurationSeconds(calculatedDuration)); 
       setIsPredicting(false);
 
       setIsExplaining(true);
       setSignalExplanation('');
       const activeInds = indicators.map(i => `${i.name}: ${i.status}`).join(', ');
-      generateSignalExplanation(asset, type, Math.floor(calculatedConfidence), activeInds).then(explanation => {
+      
+      try {
+        const explanation = await generateSignalExplanation(asset, type, conf, activeInds, adminSettings.marketBias, currentPrice, data);
         setSignalExplanation(explanation);
+      } catch (err) {
+        console.error("Manual explanation failed:", err);
+      } finally {
         setIsExplaining(false);
-      });
-    }, 2000);
+      }
+    } catch (err) {
+      console.error("Generate manual signal failed:", err);
+      setIsPredicting(false);
+      setIsExplaining(false);
+    }
   };
 
-  // Signal generation logic (Advanced Weighted Engine)
+  // Signal generation logic (Reactive to indicator changes)
   useEffect(() => {
-    if (!isAutoSignalEnabled) return;
+    if (!isAutoSignalEnabled || signal !== 'NEUTRAL' || isPredicting) return;
 
-    const signalInterval = setInterval(() => {
-      if (signal !== 'NEUTRAL' || isPredicting) return;
+    const bullishCount = indicators.filter(i => i.status === 'BULLISH').length;
+    const bearishCount = indicators.filter(i => i.status === 'BEARISH').length;
+    
+    // Auto-signal consensus threshold
+    let type: SignalType = 'NEUTRAL';
+    const threshold = adminSettings.signalSensitivity || 3;
+    const bias = adminSettings.marketBias;
 
-      // Weighted Signal Engine
-      let totalScore = 0;
-      indicators.forEach(ind => {
-        if (ind.status === 'BULLISH') totalScore += 1.25;
-        if (ind.status === 'BEARISH') totalScore -= 1.25;
-        
-        if (ind.name === 'SMA Cross') {
-          totalScore += ind.status === 'BULLISH' ? 2.5 : -2.5;
-        }
-      });
-      
-      let type: SignalType = 'NEUTRAL';
-      
-      // Strict threshold for high historical accuracy simulation
-      if (totalScore >= 5.5) type = 'BUY';
-      else if (totalScore <= -5.5) type = 'SELL';
-      
-      // Random "AI pattern" fallback for user engagement (reduced frequency, higher quality)
-      if (type === 'NEUTRAL' && Math.random() > 0.95) {
-        type = Math.random() > 0.5 ? 'BUY' : 'SELL';
-      }
-      
-      if (type !== 'NEUTRAL') {
-        let calculatedConfidence = Math.min(99, 90 + Math.abs(totalScore) * 1.2);
-        
-        // If it was a neutral fallback, fake a high confidence to simulate finding a hidden pattern
-        if (Math.abs(totalScore) < 5.5) {
-           calculatedConfidence = 90 + Math.random() * 5;
-        }
+    // Apply global market bias to auto signals if set
+    if (bias !== 'NEUTRAL') {
+      type = bias as SignalType;
+    } else {
+      if (bullishCount >= threshold) type = 'BUY';
+      else if (bearishCount >= threshold) type = 'SELL';
+    }
+    
+    if (type !== 'NEUTRAL') {
+      // Frequency throttle - higher frequency setting means less chance of skipping
+      const freq = adminSettings.signalFrequency || 5;
+      if (Math.random() * 11 > freq) return; 
 
-        // Only emit auto signal if confidence meets or exceeds the threshold
-        if (calculatedConfidence >= autoSignalThreshold) {
-          setPredictionType(type);
-          setIsPredicting(true);
+      setPredictionType(type);
+      setIsPredicting(true);
+      
+      let isSubscribed = true;
+
+      const runAutoSignal = async () => {
+        try {
+          // Rapid scan
+          await new Promise(resolve => setTimeout(resolve, 200));
           
-          setTimeout(() => {
-            setSignal(type);
-            setConfidence(Math.floor(calculatedConfidence));
-            setTimeLeft(60);
+          if (!isSubscribed) return;
+
+          if (signal !== 'NEUTRAL') {
             setIsPredicting(false);
+            return;
+          }
 
-            setIsExplaining(true);
-            setSignalExplanation('');
-            const activeInds = indicators.map(i => `${i.name}: ${i.status}`).join(', ');
-            generateSignalExplanation(asset, type, Math.floor(calculatedConfidence), activeInds).then(explanation => {
+          let calculatedDuration = '1M';
+          if (durationMode === 'AI_DYNAMIC') {
+            const options = ['2M', '3M', '4M', '5M', '7M', '10M', '15M'];
+            calculatedDuration = options[Math.floor(Math.random() * options.length)];
+          } else {
+            calculatedDuration = durationMode;
+          }
+
+          const conf = adminSettings.successRate + (Math.random() > 0.5 ? 1 : 0);
+          setSignal(type);
+          setConfidence(conf);
+          setDuration(calculatedDuration);
+          setTimeLeft(getDurationSeconds(calculatedDuration));
+          setIsPredicting(false);
+
+          setIsExplaining(true);
+          setSignalExplanation('');
+          const activeInds = indicators.map(i => `${i.name}: ${i.status}`).join(', ');
+          
+          try {
+            const explanation = await generateSignalExplanation(asset, type, conf, activeInds, adminSettings.marketBias, currentPrice, data);
+            if (isSubscribed) {
               setSignalExplanation(explanation);
-              setIsExplaining(false);
-            });
-          }, 2200);
+            }
+          } catch (err) {
+            console.error("Auto explanation failed:", err);
+          } finally {
+            if (isSubscribed) setIsExplaining(false);
+          }
+        } catch (err) {
+          console.error("Auto signal run failed:", err);
+          if (isSubscribed) {
+            setIsPredicting(false);
+            setIsExplaining(false);
+          }
         }
-      }
-    }, 3000);
+      };
 
-    return () => clearInterval(signalInterval);
-  }, [signal, isPredicting, asset, indicators, isAutoSignalEnabled, autoSignalThreshold]);
+      runAutoSignal();
+
+      return () => {
+        isSubscribed = false;
+      };
+    } else if (isAutoSignalEnabled && !isPredicting && signal === 'NEUTRAL') {
+      // Dynamic scanning UI feedback
+      const currentBias = bullishCount >= bearishCount ? 'BUY' : 'SELL';
+      if (predictionType !== currentBias) {
+        setPredictionType(currentBias);
+      }
+    }
+  }, [indicators, isAutoSignalEnabled, signal, isPredicting, adminSettings]);
 
   // Auto Trade execution logic
   const currentSignalTraded = React.useRef(false);
@@ -733,13 +821,13 @@ export default function App() {
   }, [signal]);
 
   useEffect(() => {
-    const isAssetAutoTradeEnabled = autoTradeAssets.includes(asset);
-    if (isAutoTradeEnabled && isAssetAutoTradeEnabled && (signal === 'BUY' || signal === 'SELL') && !currentSignalTraded.current) {
+    if (isAutoTradeEnabled && (signal === 'BUY' || signal === 'SELL') && !currentSignalTraded.current) {
       currentSignalTraded.current = true;
       
       const stopLossCalc = signal === 'BUY' ? currentPrice * 0.99 : currentPrice * 1.01;
       const takeProfitCalc = signal === 'BUY' ? currentPrice * 1.02 : currentPrice * 0.98;
       const finalAmount = isAiAmount ? (Math.floor(Math.random() * 400) + 100) : autoTradeAmount;
+      const calculatedLotSize = isAiAmount ? (finalAmount / 100) : lotSize;
       
       const newTrade: Trade = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -750,12 +838,49 @@ export default function App() {
         takeProfit: takeProfitCalc,
         currentPrice,
         amount: finalAmount,
-        maxProfit: 0
+        maxProfit: 0,
+        lotSize: calculatedLotSize
       };
       
       setOpenTrades(prev => [...prev, newTrade]);
     }
-  }, [signal, isAutoTradeEnabled, autoTradeAssets, currentPrice, asset, isAiAmount, autoTradeAmount]);
+  }, [signal, isAutoTradeEnabled, currentPrice, asset, isAiAmount, autoTradeAmount, lotSize]);
+
+  // Tournament Failsafe: No Dead Zone (Moved here to ensure indicators/settings are declared)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (now - lastSignalTime.current > 7000 && !isPredicting && signal === 'NEUTRAL') {
+        // Force signal if engine is idle too long
+        console.log("⚠️ TOURNAMENT AI ENGINE: FORCING SIGNAL DUE TO IDLE GAP");
+        const forcedType = Math.random() > 0.5 ? 'BUY' : 'SELL';
+        
+        setPredictionType(forcedType);
+        setIsPredicting(true);
+        lastSignalTime.current = Date.now();
+        
+        setTimeout(async () => {
+          setSignal(forcedType);
+          setConfidence(Math.floor(Math.random() * 5) + 94);
+          setIsPredicting(false);
+          
+          const activeInds = indicators.map(i => `${i.name}: ${i.status}`).join(', ');
+          try {
+            const explanation = await generateSignalExplanation(asset, forcedType, 95, activeInds, adminSettings.marketBias, currentPrice, data);
+            setSignalExplanation(explanation);
+          } catch (e) {}
+        }, 1200);
+      }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [isPredicting, signal, asset, indicators, adminSettings.marketBias]);
+
+  // Update last signal time whenever a signal changes
+  useEffect(() => {
+    if (signal !== 'NEUTRAL') {
+      lastSignalTime.current = Date.now();
+    }
+  }, [signal]);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#050507] text-slate-300 font-sans selection:bg-blue-500/30">
@@ -769,61 +894,13 @@ export default function App() {
           <Zap className="text-white w-7 h-7 fill-white" />
         </motion.div>
         <nav className="flex md:flex-col gap-8">
-          <button className="text-blue-500 relative group transition-all duration-300">
-            <LayoutDashboard className="w-6 h-6 shadow-[0_0_15px_rgba(59,130,246,0.3)]" />
-            <motion.div 
-              layoutId="active-nav"
-              className="absolute -right-4 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.8)] hidden md:block" 
-            />
+          <button className="text-blue-500 relative group">
+            <LayoutDashboard className="w-6 h-6" />
+            <div className="absolute -right-4 top-1/2 -translate-y-1/2 w-1 h-4 bg-blue-500 rounded-full hidden md:block" />
           </button>
-          
-          {/* Indicators Toggle */}
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className="text-slate-600 hover:text-blue-400 transition-all duration-300 hover:scale-110 active:scale-95 group relative"
-            title="Settings & Indicators"
-          >
-            <Settings className="w-6 h-6 group-hover:rotate-45 transition-transform duration-500" />
-          </button>
-
-          {/* Auto Signal Toggle */}
-          <button 
-            onClick={() => setIsAutoSignalEnabled(!isAutoSignalEnabled)}
-            className={cn(
-              "transition-all duration-300 hover:scale-120 relative group",
-              isAutoSignalEnabled ? "text-indigo-400" : "text-slate-600 hover:text-slate-400"
-            )}
-            title="AI Auto Signal"
-          >
-            <Bot className={cn("w-6 h-6 transition-all", isAutoSignalEnabled && "drop-shadow-[0_0_8px_rgba(129,140,248,0.6)]")} />
-            {isAutoSignalEnabled ? (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(129,140,248,1)] animate-pulse" />
-            ) : (
-              <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-slate-800 rounded-full group-hover:bg-slate-700 transition-colors" />
-            )}
-          </button>
-
-          {/* Auto Trade Toggle */}
-          <button 
-            onClick={() => setIsAutoTradeEnabled(!isAutoTradeEnabled)}
-            className={cn(
-              "transition-all duration-300 hover:scale-120 relative group",
-              isAutoTradeEnabled ? "text-emerald-400" : "text-slate-600 hover:text-slate-400"
-            )}
-            title="AI Auto Trading"
-          >
-            <Zap className={cn("w-6 h-6 transition-all", isAutoTradeEnabled && "fill-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]")} />
-            {isAutoTradeEnabled ? (
-              <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full shadow-[0_0_10px_rgba(52,211,153,1)] animate-pulse" />
-            ) : (
-              <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-slate-800 rounded-full group-hover:bg-slate-700 transition-colors" />
-            )}
-          </button>
-
           <button 
             onClick={() => setIsHistoryOpen(true)}
-            className="text-slate-600 hover:text-slate-300 transition-all duration-300 hover:scale-110 active:scale-95"
-            title="Trading History"
+            className="text-slate-600 hover:text-slate-400 transition-all duration-300 hover:scale-110"
           >
             <History className="w-6 h-6" />
           </button>
@@ -845,198 +922,598 @@ export default function App() {
           >
             <Settings className="w-6 h-6" />
           </button>
+          <button 
+            onClick={() => setIsAdminOpen(true)}
+            className="text-slate-600 hover:text-indigo-400 transition-all duration-300 hover:scale-110"
+          >
+            <Shield className="w-6 h-6" />
+          </button>
         </nav>
       </aside>
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0 md:overflow-hidden relative">
-        {/* Top Header Bar */}
-        <header className="h-16 bg-[#0a0a0c] border-b border-white/5 flex items-center justify-between px-4 md:px-6 z-40 shrink-0">
-          <div className="flex items-center gap-3 md:gap-6">
-            <motion.div
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="flex items-center gap-3"
-            >
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-600/20 shrink-0">
-                <Zap className="text-white w-5 h-5 fill-white" />
-              </div>
-              <h1 className="text-xl font-black tracking-tighter text-white italic uppercase hidden lg:block">
-                People Squad <span className="text-blue-500 not-italic">Trading</span>
-              </h1>
-            </motion.div>
+      {/* Main Content */}
+      <main className="flex-1 p-6 md:p-10 overflow-y-auto custom-scrollbar relative">
+        {/* Background Ambient Glow */}
+        <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-blue-600/5 blur-[120px] rounded-full -z-10 pointer-events-none" />
+        <div className="fixed bottom-0 left-24 w-[400px] h-[400px] bg-indigo-600/5 blur-[100px] rounded-full -z-10 pointer-events-none" />
 
-            {/* Asset Quick Switcher - Horizontal Scroll */}
-            <div className="flex items-center gap-1 overflow-x-auto no-scrollbar max-w-[140px] xs:max-w-[200px] md:max-w-md lg:max-w-xl">
-              {assets.map((a) => (
-                <button
-                  key={a}
-                  onClick={() => setAsset(a)}
+        <header className="flex flex-col xl:flex-row xl:items-center justify-between mb-10 gap-6">
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+          >
+            <h1 className="text-3xl font-black tracking-tighter text-white flex items-center gap-3 italic uppercase">
+              ProfitSignal <span className="text-blue-500 not-italic">PRO</span>
+            </h1>
+            <p className="text-slate-500 text-xs font-mono uppercase tracking-[0.3em] mt-1">Neural Market Analysis Engine v2.4</p>
+            {aiOptimizationStats.boost > 0 && (
+              <motion.div 
+                id="aiStatus"
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1 border rounded-full mt-2 transition-all duration-300",
+                  aiOptimizationStats.isHyperBoost 
+                    ? "bg-pink-500/10 border-pink-500/30 text-pink-400 shadow-[0_0_12px_rgba(236,72,153,0.3)]" 
+                    : "bg-indigo-500/10 border-indigo-500/20 text-indigo-400"
+                )}
+              >
+                <div className={cn(
+                  "w-1.5 h-1.5 rounded-full animate-ping",
+                  aiOptimizationStats.isHyperBoost ? "bg-pink-400" : "bg-indigo-400"
+                )} />
+                <span className="text-[10px] font-black uppercase tracking-widest">
+                  {aiOptimizationStats.isHyperBoost 
+                    ? "⚡ QUANTUM HYPER-DRIVE ACTIVE (99.9%)" 
+                    : `🚀 AI Strategy Boosted (${aiOptimizationStats.currentSuccess.toFixed(1)}%)`}
+                </span>
+              </motion.div>
+            )}
+          </motion.div>
+          
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Broker Selector */}
+            <div className="flex items-center gap-2 bg-[#0a0a0c] border border-white/5 rounded-xl p-1 pr-3">
+              <div className="flex p-1 bg-white/5 rounded-lg gap-1">
+                <button 
+                  onClick={() => setSelectedBroker('POCKET_OPTION')}
                   className={cn(
-                    "px-3 py-1.5 rounded-lg text-[10px] font-black transition-all uppercase tracking-tighter whitespace-nowrap",
-                    asset === a 
-                      ? "bg-white/10 text-white" 
-                      : "text-slate-500 hover:text-slate-300"
+                    "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all uppercase tracking-wider flex items-center gap-1.5",
+                    selectedBroker === 'POCKET_OPTION' ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"
                   )}
                 >
-                  {a}
+                  Pocket
                 </button>
-              ))}
+                <button 
+                  onClick={() => setSelectedBroker('QUOTEX')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all uppercase tracking-wider flex items-center gap-1.5",
+                    selectedBroker === 'QUOTEX' ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"
+                  )}
+                >
+                  Quotex
+                </button>
+              </div>
+              {selectedBroker !== 'NONE' && (
+                <motion.a
+                  href={selectedBroker === 'POCKET_OPTION' ? "https://pocketoption.com" : "https://quotex.com"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="p-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-all ml-1"
+                  title={`Open ${selectedBroker === 'POCKET_OPTION' ? 'Pocket Option' : 'Quotex'}`}
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </motion.a>
+              )}
             </div>
-          </div>
 
-          <div className="flex items-center gap-4">
-            {/* Account Selector & Balance */}
-            <div className="flex items-center gap-1 md:gap-2 bg-white/5 border border-white/5 rounded-xl p-0.5 md:p-1 pr-2 md:pr-3">
-               <div className="flex p-0.5 bg-black/40 rounded-lg shrink-0">
+            {/* Account Balance Display */}
+            <div className="flex items-center gap-2 bg-[#0a0a0c] border border-white/5 rounded-xl p-1 pr-3">
+              <div className="flex p-1 bg-white/5 rounded-lg gap-1">
                 <button 
                   onClick={() => setAccountType('DEMO')}
                   className={cn(
-                    "px-1.5 md:px-3 py-1 rounded-md text-[8px] md:text-[9px] font-bold transition-all uppercase tracking-wider",
-                    accountType === 'DEMO' ? "bg-[#3b82f6] text-white" : "text-slate-500 hover:text-slate-300"
+                    "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all uppercase tracking-wider",
+                    accountType === 'DEMO' ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"
                   )}
                 >
-                  <span className="hidden xs:inline">Demo</span>
-                  <span className="xs:hidden">D</span>
+                  Demo
                 </button>
                 <button 
                   onClick={() => setAccountType('REAL')}
                   className={cn(
-                    "px-1.5 md:px-3 py-1 rounded-md text-[8px] md:text-[9px] font-bold transition-all uppercase tracking-wider",
-                    accountType === 'REAL' ? "bg-[#10b981] text-white" : "text-slate-500 hover:text-slate-300"
+                    "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all uppercase tracking-wider",
+                    accountType === 'REAL' ? "bg-emerald-600 text-white" : "text-slate-500 hover:text-slate-300"
                   )}
                 >
-                  <span className="hidden xs:inline">Real</span>
-                  <span className="xs:hidden">R</span>
+                  Real
                 </button>
               </div>
-              <div className="pl-1 md:pl-2">
-                <motion.div 
-                  key={currentBalance}
-                  className={cn(
-                    "text-[10px] md:text-xs font-black font-mono whitespace-nowrap",
-                    accountType === 'REAL' ? "text-emerald-400" : "text-blue-400"
-                  )}
-                >
-                  ${currentBalance.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-                </motion.div>
+              <div className="pl-2 flex items-center gap-3">
+                <div>
+                  <div className="text-[9px] text-slate-500 font-mono uppercase tracking-widest leading-none mb-1">Balance</div>
+                  <motion.div 
+                    key={currentBalance}
+                    initial={{ y: balanceChange === 'up' ? 5 : balanceChange === 'down' ? -5 : 0, opacity: 0.8 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    className={cn(
+                      "text-sm font-black font-mono transition-colors duration-300",
+                      balanceChange === 'up' ? "text-emerald-400" : 
+                      balanceChange === 'down' ? "text-rose-400" : 
+                      (accountType === 'REAL' ? "text-emerald-400" : "text-blue-400")
+                    )}
+                  >
+                    ${currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </motion.div>
+                </div>
+                {(accountType === 'DEMO' ? demoBalance : realBalance) < 100 && (
+                  <motion.button
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => {
+                      if (accountType === 'DEMO') setDemoBalance(prev => prev + 1000);
+                      else setRealBalance(prev => prev + 1000);
+                    }}
+                    className="p-1.5 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-lg hover:bg-amber-500/30 transition-all"
+                    title="Quick Refill $1000"
+                  >
+                    <Zap className="w-3 h-3 fill-amber-400" />
+                  </motion.button>
+                )}
               </div>
             </div>
 
-            <div className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer transition-colors shrink-0">
-              <User className="w-4 h-4" />
+            <div className="glass-panel rounded-xl p-1.5 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-9 lg:flex gap-1">
+              {assets.map((a, idx) => (
+                <motion.button
+                  key={a}
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.02 }}
+                  onClick={() => setAsset(a)}
+                  className={cn(
+                    "px-3 py-2 rounded-lg text-[10px] font-black transition-all uppercase tracking-tighter whitespace-nowrap relative overflow-hidden",
+                    asset === a 
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" 
+                      : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                  )}
+                >
+                  {a}
+                  {asset === a && (
+                    <motion.div 
+                      layoutId="activeAsset"
+                      className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-[shimmer_2s_infinite]"
+                    />
+                  )}
+                </motion.button>
+              ))}
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="glass-panel rounded-xl px-5 py-2.5 flex flex-col min-w-[120px]">
+                <span className="text-[9px] text-slate-500 uppercase font-mono font-bold tracking-widest mb-0.5">Price</span>
+                <span className="text-lg font-mono font-black text-blue-400 leading-none">
+                  {currentPrice > 100 ? currentPrice.toFixed(2) : currentPrice.toFixed(5)}
+                </span>
+              </div>
+              <div className="glass-panel rounded-xl px-5 py-2.5 flex flex-col">
+                <span className="text-[9px] text-slate-500 uppercase font-mono font-bold tracking-widest mb-0.5">Time</span>
+                <span className="text-lg font-mono font-black text-slate-300 leading-none">
+                  {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              </div>
             </div>
           </div>
         </header>
 
-        {/* Main Trading Interface (Split Screen) */}
-        <div className="flex-1 flex flex-col md:flex-row overflow-y-auto md:overflow-x-hidden custom-scrollbar md:no-scrollbar relative">
-          {/* Left Side: Chart Section */}
-          <div className="flex-1 relative flex flex-col bg-[#050507] min-h-[500px] md:min-h-0 border-r border-white/5">
-            {/* Broker & Tools Toolbar */}
-            <div className="h-12 bg-white/[0.02] border-b border-white/5 flex items-center justify-between px-3 md:px-6 shrink-0 z-10">
-              <div className="flex items-center gap-2 md:gap-4">
-                 <div className="flex items-center gap-2">
-                   <Globe className="w-3.5 h-3.5 text-slate-500 hidden xs:block" />
-                   <span className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-widest truncate max-w-[80px] xs:max-w-none">
-                     {selectedBroker === 'NONE' ? 'Global Market' : selectedBroker === 'POCKET_OPTION' ? 'People Squad Trading' : selectedBroker}
-                   </span>
-                 </div>
-                 <div className="w-px h-4 bg-white/5 hidden xs:block" />
-                 <div className="flex items-center gap-2 md:gap-3">
-                   <button className="text-slate-500 hover:text-blue-400 transition-colors"><LayoutDashboard className="w-3.5 h-3.5 md:w-4 h-4" /></button>
-                   <button className="text-slate-500 hover:text-blue-400 transition-colors"><Zap className="w-3.5 h-3.5 md:w-4 h-4" /></button>
-                 </div>
-              </div>
-              
-              <div className="flex items-center gap-3 md:gap-6">
-                <div className="flex flex-col items-end">
-                  <span className="text-[8px] md:text-[9px] text-slate-600 font-bold uppercase tracking-widest leading-none mb-0.5">Price</span>
-                  <span className="text-[10px] md:text-xs font-mono font-black text-blue-400 leading-none">
-                    {currentPrice > 100 ? currentPrice.toFixed(2) : currentPrice.toFixed(5)}
-                  </span>
-                </div>
-                <div className="flex flex-col items-end">
-                  <span className="text-[8px] md:text-[9px] text-slate-600 font-bold uppercase tracking-widest leading-none mb-0.5">Time</span>
-                  <span className="text-[10px] md:text-xs font-mono font-black text-slate-400 leading-none">
-                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={asset}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-10">
+              <div className="lg:col-span-2 relative group">
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500/20 to-indigo-500/20 rounded-3xl blur opacity-0 group-hover:opacity-100 transition duration-1000 group-hover:duration-200" />
+                <div className="relative glass-panel rounded-3xl overflow-hidden">
+                  <TradingViewChart 
+                    asset={asset} 
+                    signal={signal} 
+                    currentPrice={currentPrice} 
+                    signalEntryPrice={signalEntryPrice || undefined}
+                    onCalibratePrice={calibratePrice} 
+                  />
+                  {/* Scanning Line Effect */}
+                  <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden opacity-10">
+                    <div className="w-full h-[2px] bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-[scan_4s_linear_infinite]" />
+                  </div>
                 </div>
               </div>
-            </div>
+              <div className="flex flex-col">
+                <SignalPanel 
+                  signal={signal} 
+                  confidence={confidence} 
+                  asset={asset} 
+                  duration={duration} 
+                  timeLeft={timeLeft}
+                  isPredicting={isPredicting}
+                  predictionType={predictionType}
+                  explanation={signalExplanation}
+                  isExplaining={isExplaining}
+                  selectedBroker={selectedBroker}
+                  aiBoosted={aiOptimizationStats.boost > 0}
+                  currentPrice={currentPrice}
+                  signalEntryPrice={signalEntryPrice || undefined}
+                  onExecuteTrade={(type) => {
+                    const decimals = currentPrice > 5 ? 2 : 5;
+                    const stopLossCalc = parseFloat((type === 'BUY' ? currentPrice * 0.995 : currentPrice * 1.005).toFixed(decimals));
+                    const takeProfitCalc = parseFloat((type === 'BUY' ? currentPrice * 1.01 : currentPrice * 0.99).toFixed(decimals));
+                    const finalAmount = isAiAmount ? (Math.floor(Math.random() * 400) + 100) : autoTradeAmount;
+                    const calculatedLotSize = isAiAmount ? (finalAmount / 100) : lotSize;
+                    
+                    const newTrade: Trade = {
+                      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                      asset,
+                      type,
+                      entryPrice: currentPrice,
+                      stopLoss: stopLossCalc,
+                      takeProfit: takeProfitCalc,
+                      currentPrice,
+                      amount: finalAmount,
+                      maxProfit: 0,
+                      lotSize: calculatedLotSize
+                    };
+                    setOpenTrades(prev => [...prev, newTrade]);
+                  }}
+                />
+                
+                <div className="flex gap-2 mt-4">
+                  <button 
+                    onClick={generateManualSignal}
+                    disabled={isPredicting}
+                    className="flex-1 py-4 bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 rounded-2xl text-indigo-400 font-black uppercase tracking-widest text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden shadow-lg shadow-indigo-600/5 active:scale-95"
+                  >
+                    <motion.div 
+                      key={signal}
+                      className="flex items-center gap-2"
+                      animate={signal !== 'NEUTRAL' ? { scale: [1, 1.05, 1] } : {}}
+                      transition={{ duration: 0.5, repeat: signal !== 'NEUTRAL' ? Infinity : 0 }}
+                    >
+                      <Zap className={cn("w-4 h-4", signal !== 'NEUTRAL' && "fill-indigo-400 shadow-[0_0_10px_rgba(129,140,248,0.5)]")} />
+                      {signal === 'NEUTRAL' ? 'GENERATE SIGNAL' : 'REFRESH SIGNAL'}
+                    </motion.div>
+                  </button>
+                  <button 
+                    onClick={() => setIsAutoSignalEnabled(!isAutoSignalEnabled)}
+                    className={cn(
+                      "flex-1 py-4 border rounded-2xl font-black uppercase tracking-widest text-sm transition-all flex items-center justify-center gap-2 active:scale-95",
+                      isAutoSignalEnabled 
+                        ? "bg-blue-600/20 border-blue-500/50 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.15)]" 
+                        : "bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-800"
+                    )}
+                  >
+                    <Bot className={cn("w-4 h-4", isAutoSignalEnabled && "animate-pulse fill-blue-500/20")} />
+                    {isAutoSignalEnabled ? 'AUTO: ON' : 'AUTO: OFF'}
+                  </button>
+                </div>
 
-            <div className="flex-1 relative overflow-hidden">
-               <TradingViewChart asset={asset} currentPrice={currentPrice} openTrades={openTrades} />
-               
-               {/* Scanning Effect Overlay */}
-               <div className="absolute inset-0 pointer-events-none opacity-5 overflow-hidden z-20">
-                 <div className="w-full h-1 bg-blue-500 shadow-[0_0_20px_blue] animate-[scan_6s_linear_infinite]" />
-               </div>
-            </div>
-            
-            {/* Bottom Meta Info Bar */}
-            <div className="h-10 border-t border-white/5 flex items-center justify-between px-4 md:px-6 bg-[#0a0a0c] shrink-0">
-               <div className="flex items-center gap-3 md:gap-4">
-                 <div className="flex items-center gap-2">
-                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                   <span className="text-[8px] md:text-[9px] text-slate-500 font-bold uppercase tracking-widest">Market Open</span>
-                 </div>
-                 <span className="text-[8px] md:text-[9px] text-slate-600 font-mono tracking-tighter">VOL: ${(526210).toLocaleString()}</span>
-               </div>
-               <div className="flex items-center gap-2 md:gap-4 text-[8px] md:text-[9px] text-slate-600 font-bold">
-                 <span className="hidden xs:inline">NEURAL LINK ACTIVE</span>
-                 <Bot className="w-3 h-3 text-blue-500" />
-               </div>
-            </div>
+                <div className="flex gap-2 mt-6">
+                  <button 
+                    onClick={() => setIsRiskOpen(true)}
+                    className="flex-1 py-4 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 rounded-2xl text-blue-400 font-black uppercase tracking-widest text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <Zap className="w-4 h-4" />
+                    Manual
+                  </button>
+                  <button 
+                    onClick={() => setIsAutoTradeEnabled(!isAutoTradeEnabled)}
+                    className={cn(
+                      "flex-1 py-4 border rounded-2xl font-black uppercase tracking-widest text-sm transition-all flex items-center justify-center gap-2",
+                      isAutoTradeEnabled 
+                        ? "bg-emerald-600/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]" 
+                        : "bg-slate-800/50 border-slate-700 text-slate-500 hover:bg-slate-800"
+                    )}
+                  >
+                    <Bot className="w-4 h-4" />
+                    {isAutoTradeEnabled ? 'Auto: ON' : 'Auto: OFF'}
+                  </button>
+                </div>
 
-            {/* Indicators and Open Trades Overlay (Mobile Only) */}
-            <div className="md:hidden flex flex-col gap-4 p-4 bg-[#050507]">
-               <IndicatorGrid indicators={indicators.filter(i => visibleIndicators.includes(i.name))} />
-               <OpenTrades trades={openTrades} onCloseTrade={(id) => {
-                  setOpenTrades(prev => prev.filter(t => t.id !== id));
-               }} />
-            </div>
-          </div>
+                {/* Auto Trade Settings */}
+                <div className="mt-4 glass-panel p-4 rounded-2xl flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Auto Trade Amount</span>
+                    <button
+                      onClick={() => setIsAiAmount(!isAiAmount)}
+                      className={cn(
+                        "text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded transition-colors flex items-center gap-1",
+                        isAiAmount ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" : "bg-slate-800 text-slate-500 border border-slate-700"
+                      )}
+                    >
+                      <Bot className="w-3 h-3" /> AI Auto
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-mono">$</span>
+                    <input 
+                      type="number" 
+                      value={isAiAmount ? '' : autoTradeAmount}
+                      placeholder={isAiAmount ? 'AI Calculated' : '100'}
+                      onChange={(e) => { 
+                        setAutoTradeAmount(Number(e.target.value)); 
+                        setIsAiAmount(false); 
+                        setLotSize(Number((Number(e.target.value) / 100).toFixed(2)));
+                      }}
+                      disabled={isAiAmount}
+                      className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono text-sm focus:border-blue-500/50 outline-none disabled:opacity-50"
+                    />
+                  </div>
+                </div>
 
-          {/* Right Side: Deal Panel (People Squad style) */}
-          <aside className="w-full md:w-80 shrink-0 z-10 border-t md:border-t-0 md:border-l border-white/5 flex flex-col md:overflow-hidden bg-[#0a0a0c]">
-            <div className="flex-1 md:overflow-y-auto custom-scrollbar">
-              <DealPanel 
-                asset={asset}
-                amount={tradeAmount}
-                onAmountChange={setTradeAmount}
-                duration={duration}
-                onDurationChange={setDuration}
-                balance={currentBalance}
-                signal={signal}
-                confidence={confidence}
-                explanation={signalExplanation}
-                isExplaining={isExplaining}
-                onTrade={handleManualTrade}
-                onGenerateSignal={generateManualSignal}
-                isPredicting={isPredicting}
-                isAutoSignalEnabled={isAutoSignalEnabled}
-                onToggleAutoSignal={() => setIsAutoSignalEnabled(!isAutoSignalEnabled)}
-              />
-            </div>
+                {/* Lot Position Size Selector */}
+                <div className="mt-4 glass-panel p-4 rounded-2xl flex flex-col gap-3 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-400 animate-pulse" /> Lot Position Size
+                    </span>
+                    <span className="text-xs font-mono font-black text-blue-400">{lotSize.toFixed(2)} Lot</span>
+                  </div>
+                  
+                  {/* Presets Grid */}
+                  <div className="grid grid-cols-5 gap-1">
+                    {[0.10, 1.00, 2.00, 4.00, 5.00].map((preset) => (
+                      <button
+                        key={preset}
+                        onClick={() => {
+                          setLotSize(preset);
+                          setIsAiAmount(false);
+                          setAutoTradeAmount(preset * 100);
+                        }}
+                        className={cn(
+                          "py-1.5 rounded-lg text-[10px] font-black transition-all",
+                          lotSize === preset && !isAiAmount
+                            ? "bg-blue-600/20 text-blue-400 border border-blue-500/50 shadow-[0_0_10px_rgba(59,130,246,0.2)] animate-pulse"
+                            : "bg-white/5 text-slate-400 border border-transparent hover:bg-white/10"
+                        )}
+                      >
+                        {preset.toFixed(1)} L
+                      </button>
+                    ))}
+                  </div>
 
-            {/* Desktop Indicators Grid */}
-            <div className="hidden md:block p-4 border-t border-white/5 bg-black/20 overflow-y-auto custom-scrollbar h-[300px]">
-              <div className="flex items-center gap-2 mb-4">
-                <LayoutDashboard className="w-4 h-4 text-blue-500" />
-                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Market Stats</span>
+                  {/* Custom Float Input */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center bg-slate-900/50 border border-white/5 rounded-lg px-2 py-1.5 gap-2 group focus-within:border-blue-500/30 transition-all">
+                      <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">Float Custom</span>
+                      <input 
+                        type="number" 
+                        value={isAiAmount ? '' : lotSize}
+                        placeholder={isAiAmount ? 'AI Lot Float' : '1.00'}
+                        step="0.01"
+                        min="0.01"
+                        max="100.00"
+                        onChange={(e) => {
+                          const val = Math.max(0.01, parseFloat(e.target.value) || 0.01);
+                          setLotSize(val);
+                          setIsAiAmount(false);
+                          setAutoTradeAmount(val * 100);
+                        }}
+                        disabled={isAiAmount}
+                        className="w-full bg-transparent text-right text-white font-mono text-xs focus:outline-none disabled:opacity-40"
+                      />
+                    </div>
+                    
+                    <div className="flex bg-white/5 rounded-lg border border-white/5 overflow-hidden">
+                      <button 
+                        onClick={() => {
+                          const next = Math.max(0.01, lotSize - 0.1);
+                          setLotSize(Number(next.toFixed(2)));
+                          setIsAiAmount(false);
+                          setAutoTradeAmount(Number((next * 100).toFixed(2)));
+                        }}
+                        disabled={isAiAmount}
+                        className="px-2 py-1.5 text-slate-400 hover:text-white transition-all text-xs font-black hover:bg-white/5 active:scale-90"
+                      >
+                        -
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const next = lotSize + 0.1;
+                          setLotSize(Number(next.toFixed(2)));
+                          setIsAiAmount(false);
+                          setAutoTradeAmount(Number((next * 100).toFixed(2)));
+                        }}
+                        disabled={isAiAmount}
+                        className="px-2 py-1.5 text-slate-400 hover:text-white transition-all text-xs font-black border-l border-white/5 hover:bg-white/5 active:scale-90"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Neural Expiry Selector */}
+                <div className="mt-4 glass-panel p-4 rounded-2xl flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Bot className="w-3.5 h-3.5 text-indigo-400 animate-pulse" /> Neural Expiry Selector
+                    </span>
+                    <span className={cn(
+                      "text-xs font-mono font-black uppercase tracking-wider",
+                      durationMode === 'AI_DYNAMIC' ? "text-indigo-400" : "text-slate-300"
+                    )}>
+                      {durationMode === 'AI_DYNAMIC' ? 'AI Dynamic Auto' : durationMode}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1">
+                    {['1M', '3M', '5M', 'AI_DYNAMIC'].map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => {
+                          setDurationMode(mode as any);
+                          if (mode !== 'AI_DYNAMIC') {
+                            setDuration(mode);
+                            setTimeLeft(getDurationSeconds(mode));
+                          } else {
+                            setDuration('AI: Auto'); 
+                          }
+                        }}
+                        className={cn(
+                          "py-1.5 rounded-lg text-[9px] font-black transition-all uppercase tracking-tight",
+                          durationMode === mode
+                            ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 shadow-[0_0_10px_rgba(79,70,229,0.2)]"
+                            : "bg-white/5 text-slate-400 border border-transparent hover:bg-white/10"
+                        )}
+                      >
+                        {mode === 'AI_DYNAMIC' ? 'AI AUTO' : mode}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="text-[9px] font-medium text-slate-500 leading-tight italic">
+                    {durationMode === 'AI_DYNAMIC' 
+                      ? '🔮 AI continuously calculates trend duration & optimal volatility-adjusted timeframes.'
+                      : `⏱️ Fixed ${durationMode} signal expiry timer.`}
+                  </p>
+                </div>
               </div>
-              <IndicatorGrid indicators={indicators.filter(i => visibleIndicators.includes(i.name))} />
             </div>
-          </aside>
 
-          {/* Desktop Open Trades (Floating) */}
-          <div className="hidden md:block absolute bottom-12 right-[340px] z-50 pointer-events-none">
-             <div className="pointer-events-auto">
-               <OpenTrades trades={openTrades} onCloseTrade={(id) => {
-                  setOpenTrades(prev => prev.filter(t => t.id !== id));
-               }} />
-             </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-1 h-4 bg-blue-500 rounded-full" />
+                    <h3 className="text-xs font-mono text-slate-400 uppercase tracking-[0.3em] font-bold">Technical Indicators</h3>
+                  </div>
+                  <button 
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="text-[10px] font-black text-blue-500 hover:text-blue-400 transition-all flex items-center gap-1.5 bg-blue-500/5 px-3 py-1.5 rounded-lg border border-blue-500/10 hover:border-blue-500/30"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                    CONFIGURE
+                  </button>
+                </div>
+                <IndicatorGrid indicators={filteredIndicators} />
+              </div>
+              <div className="space-y-6">
+                <PerformanceStats data={performanceData} />
+                <OpenTrades 
+                  trades={openTrades} 
+                  onCloseTrade={(id) => {
+                    setOpenTrades(prev => {
+                      const trade = prev.find(t => t.id === id);
+                      if (trade) {
+                        const isBuy = trade.type === 'BUY';
+                        const pnl = isBuy 
+                          ? ((trade.currentPrice - trade.entryPrice) / trade.entryPrice) * trade.amount * 100
+                          : ((trade.entryPrice - trade.currentPrice) / trade.entryPrice) * trade.amount * 100;
+                        
+                        setTradeHistory(history => {
+                          const newEntry = {
+                            id: trade.id,
+                            asset: trade.asset,
+                            type: trade.type,
+                            entryPrice: trade.entryPrice,
+                            exitPrice: trade.currentPrice,
+                            pnl,
+                            closeTime: new Date().toLocaleTimeString(),
+                            amount: trade.amount,
+                            closedBy: 'MANUAL' as const,
+                            lotSize: trade.lotSize
+                          };
+                          const combined = [newEntry, ...history];
+                          const unique = [];
+                          const seen = new Set();
+                          for (const t of combined) {
+                            if (!seen.has(t.id)) {
+                              seen.add(t.id);
+                              unique.push(t);
+                            }
+                          }
+                          return unique;
+                        });
+
+                        setPerformanceData(pData => {
+                          const isWin = pnl > 0;
+                          const newTotal = pData.totalTrades + 1;
+                          const newWins = (pData.winRate / 100 * pData.totalTrades) + (isWin ? 1 : 0);
+
+                          // Update balance
+                          if (accountType === 'REAL') {
+                            setRealBalance(prev => prev + pnl);
+                          } else {
+                            setDemoBalance(prev => prev + pnl);
+                          }
+
+                          return {
+                            ...pData,
+                            totalTrades: newTotal,
+                            winRate: (newWins / newTotal) * 100,
+                            netProfit: pData.netProfit + pnl,
+                            profitFactor: isWin ? pData.profitFactor + 0.01 : Math.max(0.1, pData.profitFactor - 0.01)
+                          };
+                        });
+                      }
+                      return prev.filter(t => t.id !== id);
+                    });
+                  }} 
+                />
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-1 h-4 bg-amber-500 rounded-full" />
+                  <h3 className="text-xs font-mono text-slate-400 uppercase tracking-[0.3em] font-bold">Risk Management</h3>
+                </div>
+                <motion.div 
+                  whileHover={{ y: -5 }}
+                  className="glass-panel rounded-2xl p-6 flex gap-4 border-blue-500/10"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center shrink-0 border border-blue-500/20">
+                    <Info className="w-5 h-5 text-blue-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-blue-400 mb-1.5 uppercase tracking-tight">Trading Tip</h4>
+                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                      Always use 1-2% of your total balance per trade. Never chase losses. This signal engine is an aid, not a guarantee.
+                    </p>
+                  </div>
+                </motion.div>
+                <motion.div 
+                  whileHover={{ y: -5 }}
+                  className="glass-panel rounded-2xl p-6 flex gap-4 border-amber-500/10"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0 border border-amber-500/20">
+                    <ShieldAlert className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-amber-400 mb-1.5 uppercase tracking-tight">Disclaimer</h4>
+                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                      Trading binary options involves significant risk. 90% accuracy is based on historical backtesting. Past performance does not guarantee future results.
+                    </p>
+                  </div>
+                </motion.div>
+              </div>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {/* Footer Marquee */}
+        <div className="mt-16 border-t border-white/5 pt-8 overflow-hidden">
+          <div className="flex gap-12 animate-marquee whitespace-nowrap text-[10px] font-mono text-slate-600 uppercase tracking-[0.4em] font-bold">
+            {assets.map((a, i) => (
+              <span key={i} className="flex items-center gap-2">
+                <span className="text-slate-500">{a}</span>
+                <span className={i % 2 === 0 ? "text-green-500/50" : "text-red-500/50"}>
+                  {i % 2 === 0 ? "+" : "-"}{(Math.random() * 0.5).toFixed(2)}%
+                </span>
+              </span>
+            ))}
           </div>
         </div>
       </main>
@@ -1053,14 +1530,6 @@ export default function App() {
           if (type === 'REAL') setRealBalance(prev => prev + amount);
           else setDemoBalance(prev => prev + amount);
         }}
-        autoTradeAssets={autoTradeAssets}
-        onToggleAutoTradeAsset={toggleAutoTradeAsset}
-        dailyLossLimit={autoTradeDailyLossLimit}
-        profitTarget={autoTradeProfitTarget}
-        onUpdateDailyLossLimit={setAutoTradeDailyLossLimit}
-        onUpdateProfitTarget={setAutoTradeProfitTarget}
-        autoSignalThreshold={autoSignalThreshold}
-        onUpdateAutoSignalThreshold={setAutoSignalThreshold}
       />
 
       <AlertManager 
@@ -1097,7 +1566,8 @@ export default function App() {
             takeProfit: params.takeProfit,
             currentPrice,
             amount: params.amount,
-            maxProfit: 0
+            maxProfit: 0,
+            lotSize: params.lotSize
           };
           setOpenTrades(prev => [...prev, newTrade]);
         }}
@@ -1139,6 +1609,20 @@ export default function App() {
           background: rgba(255, 255, 255, 0.1);
         }
       `}</style>
+      <AdminPanel 
+        isOpen={isAdminOpen} 
+        onClose={() => setIsAdminOpen(false)} 
+        currentSettings={adminSettings}
+        onUpdateSettings={(newSettings) => {
+          setAdminSettings(newSettings);
+          localStorage.setItem('profitSignal_adminSettings', JSON.stringify(newSettings));
+          setIsAdminOpen(false);
+        }}
+      />
+      <AIAssistant 
+        onOptimize={handleAIOptimize} 
+        isAutoTradeEnabled={isAutoTradeEnabled} 
+      />
     </div>
   );
 }
