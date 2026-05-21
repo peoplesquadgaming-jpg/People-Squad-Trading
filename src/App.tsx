@@ -11,7 +11,10 @@ import { OpenTrades, Trade } from './components/OpenTrades';
 import { TradingHistoryModal, ClosedTrade } from './components/TradingHistoryModal';
 import { AdminPanel } from './components/AdminPanel';
 import { AIAssistant } from './components/AIAssistant';
-import { Shield, ShieldAlert, Info, History, Settings, LayoutDashboard, Zap, Bell, Bot, ExternalLink, Globe, Sparkles } from 'lucide-react';
+import { PocketOptionLoginModal } from './components/PocketOptionLoginModal';
+import { AssetHubModal } from './components/AssetHubModal';
+import { UserProfileModal } from './components/UserProfileModal';
+import { Shield, ShieldAlert, Info, History, Settings, LayoutDashboard, Zap, Bell, Bot, ExternalLink, Globe, Sparkles, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { generateSignalExplanation } from './services/geminiService';
@@ -176,7 +179,7 @@ export default function App() {
     return localStorage.getItem('profitSignal_autoSignal') !== 'false';
   });
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
-  const [activeNotification, setActiveNotification] = useState<PriceAlert | null>(null);
+  const [activeNotification, setActiveNotification] = useState<any | null>(null);
   const [openTrades, setOpenTrades] = useState<Trade[]>([]);
   const [tradeHistory, setTradeHistory] = useState<ClosedTrade[]>(() => {
     const saved = localStorage.getItem('profitSignal_tradeHistory');
@@ -198,6 +201,16 @@ export default function App() {
       } catch (e) {}
     }
     return [];
+  });
+  const [isPoModalOpen, setIsPoModalOpen] = useState(false);
+  const [isAssetHubOpen, setIsAssetHubOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [poConnection, setPoConnection] = useState(() => {
+    const connected = localStorage.getItem('profitSignal_po_connected') === 'true';
+    const email = localStorage.getItem('profitSignal_po_email') || '';
+    const server = (localStorage.getItem('profitSignal_po_server') as 'DEMO' | 'REAL') || 'DEMO';
+    const uid = localStorage.getItem('profitSignal_po_uid') || '';
+    return { connected, email, server, uid };
   });
   const [visibleIndicators, setVisibleIndicators] = useState<string[]>(() => {
     const saved = localStorage.getItem('profitSignal_visibleIndicators');
@@ -223,9 +236,16 @@ export default function App() {
   const allIndicatorNames = ['RSI (14)', 'MACD', 'MA (20)', 'MA (50)', 'Stochastic', 'Bollinger', 'AO', 'SRSI'];
 
   const assets = [
-    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/GBP', 'NZD/USD', 'USD/CHF', 'GBP/JPY', 'EUR/JPY',
-    'BTC/USD', 'ETH/USD', 'LTC/USD', 'XRP/USD',
-    'GOLD', 'SILVER', 'BRENT', 'CRUDE'
+    // Forex Majors
+    'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD',
+    // Forex Minors & Crosses
+    'EUR/GBP', 'GBP/JPY', 'EUR/JPY', 'AUD/JPY', 'CAD/JPY', 'CHF/JPY', 'NZD/JPY', 'GBP/CHF', 'EUR/CHF', 'EUR/CAD', 'GBP/CAD', 'AUD/CAD', 'EUR/AUD', 'GBP/AUD', 'AUD/NZD',
+    // Forex Exotics
+    'USD/TRY', 'USD/MXN', 'USD/SGD', 'USD/ZAR', 'USD/HKD', 'EUR/TRY', 'EUR/ZAR',
+    // Cryptos
+    'BTC/USD', 'ETH/USD', 'LTC/USD', 'XRP/USD', 'SOL/USD', 'BNB/USD', 'ADA/USD', 'DOGE/USD',
+    // Commodities
+    'GOLD', 'SILVER', 'BRENT', 'CRUDE', 'PLATINUM', 'PALLADIUM', 'COPPER'
   ];
 
   // Save preferences to local storage
@@ -276,6 +296,35 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('profitSignal_selectedBroker', selectedBroker);
   }, [selectedBroker]);
+
+  const handlePoSuccess = (email: string, server: 'DEMO' | 'REAL', uid: string) => {
+    localStorage.setItem('profitSignal_po_connected', 'true');
+    localStorage.setItem('profitSignal_po_email', email);
+    localStorage.setItem('profitSignal_po_server', server);
+    localStorage.setItem('profitSignal_po_uid', uid);
+    setPoConnection({
+      connected: true,
+      email,
+      server,
+      uid,
+    });
+    setAccountType(server);
+    setSelectedBroker('POCKET_OPTION');
+  };
+
+  const handlePoDisconnect = () => {
+    localStorage.removeItem('profitSignal_po_connected');
+    localStorage.removeItem('profitSignal_po_email');
+    localStorage.removeItem('profitSignal_po_password');
+    localStorage.removeItem('profitSignal_po_server');
+    localStorage.removeItem('profitSignal_po_uid');
+    setPoConnection({
+      connected: false,
+      email: '',
+      server: 'DEMO',
+      uid: '',
+    });
+  };
 
   useEffect(() => {
     localStorage.setItem('profitSignal_durationMode', durationMode);
@@ -548,6 +597,68 @@ export default function App() {
 
     const updatedTrades = openTrades.map(trade => {
       if (trade.asset !== asset) return trade; // Only update trades for current asset
+
+      if (trade.status === 'PENDING') {
+        const isHighValue = trade.asset.includes('BTC') || trade.asset === 'ETH' || trade.asset === 'GOLD' || trade.asset === 'USD/JPY' || trade.asset === 'GBP/JPY' || trade.asset === 'EUR/JPY' || trade.asset === 'BRENT' || trade.asset === 'CRUDE';
+        const invalidation = isHighValue ? (trade.asset.includes('BTC') || trade.asset === 'ETH' ? 45.0 : trade.asset === 'GOLD' ? 2.5 : 0.15) : 0.00045;
+        let shouldFill = false;
+        let shouldCancel = false;
+
+        if (trade.type === 'BUY') {
+          if (currentPrice <= trade.entryPrice * 1.0001) {
+            shouldFill = true;
+          } else if (currentPrice > trade.entryPrice + invalidation) {
+            shouldCancel = true;
+          }
+        } else {
+          if (currentPrice >= trade.entryPrice * 0.9999) {
+            shouldFill = true;
+          } else if (currentPrice < trade.entryPrice - invalidation) {
+            shouldCancel = true;
+          }
+        }
+
+        if (shouldFill) {
+          tradesUpdated = true;
+          setTimeout(() => {
+            setActiveNotification({
+              id: `${Date.now()}-filled`,
+              asset: trade.asset,
+              price: currentPrice,
+              type: 'FILL',
+              customTitle: '🎯 Order Executed',
+              customMessage: `Live filled limit entry on ${trade.asset} (${trade.type}) at ${currentPrice.toFixed(trade.entryPrice > 5 ? 2 : 5)}. Position is now ACTIVE!`
+            });
+          }, 50);
+
+          // Deduct trade amount from corresponding balance when order transitions from pending to active (filled)
+          if (accountType === 'REAL') {
+            setRealBalance(prev => prev - trade.amount);
+          } else {
+            setDemoBalance(prev => prev - trade.amount);
+          }
+
+          return { ...trade, status: 'FILLED', entryPrice: currentPrice, currentPrice, maxProfit: 0 };
+        }
+
+        if (shouldCancel) {
+          tradesUpdated = true;
+          setTimeout(() => {
+            setActiveNotification({
+              id: `${Date.now()}-canceled`,
+              asset: trade.asset,
+              price: trade.entryPrice,
+              type: 'CANCEL',
+              customTitle: '❌ Order Auto-Canceled',
+              customMessage: `Pending entry for ${trade.asset} was canceled automatically. Market price departed from the signal entry zone.`
+            });
+          }, 50);
+          return { ...trade, status: 'CANCELED', currentPrice };
+        }
+
+        if (trade.currentPrice !== currentPrice) tradesUpdated = true;
+        return { ...trade, currentPrice };
+      }
       
       const pnl = trade.type === 'BUY' 
         ? ((currentPrice - trade.entryPrice) / trade.entryPrice) * trade.amount * 100
@@ -564,6 +675,13 @@ export default function App() {
     if (!tradesUpdated) return;
 
     const remainingTrades = updatedTrades.filter(trade => {
+      if (trade.status === 'CANCELED') {
+        return false; // Remove auto-canceled pending trade
+      }
+      if (trade.status === 'PENDING') {
+        return true; // Keep pending order active
+      }
+
       const isBuy = trade.type === 'BUY';
       const hitStopLoss = isBuy ? trade.currentPrice <= trade.stopLoss : trade.currentPrice >= trade.stopLoss;
       const hitTakeProfit = isBuy ? trade.currentPrice >= trade.takeProfit : trade.currentPrice <= trade.takeProfit;
@@ -636,11 +754,11 @@ export default function App() {
         
         const newWinRate = (newWins / newTotal) * 100;
         
-        // Update balance
+        // Update balance (add back trade amount + pnl since trade's amount was deducted when entered/filled)
         if (accountType === 'REAL') {
-          setRealBalance(prev => prev + closedTrades.reduce((acc, t) => acc + t.pnl, 0));
+          setRealBalance(prev => prev + closedTrades.reduce((acc, t) => acc + t.amount + t.pnl, 0));
         } else {
-          setDemoBalance(prev => prev + closedTrades.reduce((acc, t) => acc + t.pnl, 0));
+          setDemoBalance(prev => prev + closedTrades.reduce((acc, t) => acc + t.amount + t.pnl, 0));
         }
         
         return {
@@ -652,7 +770,7 @@ export default function App() {
         };
       });
     }
-  }, [currentPrice, asset, isAutoTradeEnabled, signal, openTrades]);
+  }, [currentPrice, asset, isAutoTradeEnabled, signal, openTrades, accountType]);
 
   const generateManualSignal = async () => {
     if (isPredicting) return;
@@ -829,17 +947,20 @@ export default function App() {
       const finalAmount = isAiAmount ? (Math.floor(Math.random() * 400) + 100) : autoTradeAmount;
       const calculatedLotSize = isAiAmount ? (finalAmount / 100) : lotSize;
       
+      const targetEntry = signalEntryPrice !== null ? signalEntryPrice : currentPrice;
+      
       const newTrade: Trade = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         asset,
         type: signal,
-        entryPrice: currentPrice,
+        entryPrice: targetEntry,
         stopLoss: stopLossCalc,
         takeProfit: takeProfitCalc,
         currentPrice,
         amount: finalAmount,
         maxProfit: 0,
-        lotSize: calculatedLotSize
+        lotSize: calculatedLotSize,
+        status: 'PENDING'
       };
       
       setOpenTrades(prev => [...prev, newTrade]);
@@ -897,6 +1018,13 @@ export default function App() {
           <button className="text-blue-500 relative group">
             <LayoutDashboard className="w-6 h-6" />
             <div className="absolute -right-4 top-1/2 -translate-y-1/2 w-1 h-4 bg-blue-500 rounded-full hidden md:block" />
+          </button>
+          <button 
+            onClick={() => setIsProfileOpen(true)}
+            className="text-slate-600 hover:text-emerald-400 transition-all duration-300 hover:scale-110"
+            title="প্রোফাইল (Profile)"
+          >
+            <User className="w-6 h-6" />
           </button>
           <button 
             onClick={() => setIsHistoryOpen(true)}
@@ -973,16 +1101,21 @@ export default function App() {
           
           <div className="flex flex-wrap items-center gap-4">
             {/* Broker Selector */}
-            <div className="flex items-center gap-2 bg-[#0a0a0c] border border-white/5 rounded-xl p-1 pr-3">
+            <div className="flex flex-wrap items-center gap-2 bg-[#0a0a0c] border border-white/5 rounded-xl p-1 pr-3">
               <div className="flex p-1 bg-white/5 rounded-lg gap-1">
                 <button 
-                  onClick={() => setSelectedBroker('POCKET_OPTION')}
+                  onClick={() => {
+                    setSelectedBroker('POCKET_OPTION');
+                    if (!poConnection.connected) {
+                      setIsPoModalOpen(true);
+                    }
+                  }}
                   className={cn(
                     "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all uppercase tracking-wider flex items-center gap-1.5",
-                    selectedBroker === 'POCKET_OPTION' ? "bg-blue-600 text-white" : "text-slate-500 hover:text-slate-300"
+                    selectedBroker === 'POCKET_OPTION' ? "bg-amber-600/20 text-amber-400 border border-amber-500/30" : "text-slate-500 hover:text-slate-300"
                   )}
                 >
-                  Pocket
+                  Pocket {poConnection.connected && "⚡"}
                 </button>
                 <button 
                   onClick={() => setSelectedBroker('QUOTEX')}
@@ -994,6 +1127,36 @@ export default function App() {
                   Quotex
                 </button>
               </div>
+
+              {selectedBroker === 'POCKET_OPTION' && (
+                <div className="flex items-center gap-1 pl-1">
+                  {poConnection.connected ? (
+                    <motion.button
+                      onClick={handlePoDisconnect}
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="px-2.5 py-1 bg-emerald-500/10 hover:bg-rose-500/10 border border-emerald-500/20 hover:border-rose-500/20 text-emerald-400 hover:text-rose-400 rounded-lg text-[9px] font-mono font-bold transition-all flex items-center gap-1 uppercase tracking-tight group"
+                      title="Click to Disconnect Pocket Option"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping shrink-0 group-hover:bg-rose-400" />
+                      <span className="group-hover:hidden">PO Synced ID: #{poConnection.uid}</span>
+                      <span className="hidden group-hover:inline">Disconnect PO</span>
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      onClick={() => setIsPoModalOpen(true)}
+                      initial={{ scale: 0.9, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 text-amber-500 rounded-lg text-[9px] font-mono font-bold transition-all flex items-center gap-1 uppercase tracking-tight animate-pulse"
+                      title="Click to Connect Pocket Option"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                      PO Config Required
+                    </motion.button>
+                  )}
+                </div>
+              )}
+
               {selectedBroker !== 'NONE' && (
                 <motion.a
                   href={selectedBroker === 'POCKET_OPTION' ? "https://pocketoption.com" : "https://quotex.com"}
@@ -1067,30 +1230,58 @@ export default function App() {
               </div>
             </div>
 
-            <div className="glass-panel rounded-xl p-1.5 grid grid-cols-4 sm:grid-cols-6 md:grid-cols-9 lg:flex gap-1">
-              {assets.map((a, idx) => (
-                <motion.button
-                  key={a}
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.02 }}
-                  onClick={() => setAsset(a)}
-                  className={cn(
-                    "px-3 py-2 rounded-lg text-[10px] font-black transition-all uppercase tracking-tighter whitespace-nowrap relative overflow-hidden",
-                    asset === a 
-                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" 
-                      : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
-                  )}
-                >
-                  {a}
-                  {asset === a && (
-                    <motion.div 
-                      layoutId="activeAsset"
-                      className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full animate-[shimmer_2s_infinite]"
-                    />
-                  )}
-                </motion.button>
-              ))}
+            <div className="flex flex-col md:flex-row gap-2.5 items-stretch md:items-center w-full">
+              {/* Main Asset Hub Trigger (All assets inside 1 option) */}
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setIsAssetHubOpen(true)}
+                className="flex-1 md:flex-initial bg-gradient-to-r from-indigo-600 to-blue-600 text-white hover:from-indigo-500 hover:to-blue-500 rounded-xl p-3 px-5 transition-all text-xs font-black uppercase tracking-wider flex items-center justify-between md:justify-center gap-3 shadow-lg shadow-indigo-650/15 border border-indigo-400/20 active:opacity-90"
+              >
+                <div className="flex items-center gap-2">
+                  <Globe className="w-4 h-4 animate-spin-slow text-indigo-200" />
+                  <span className="font-semibold text-slate-100">📁 সব মার্কেট একসাথে ({assets.length} পেয়ার)</span>
+                </div>
+                <div className="bg-white/10 px-2 py-0.5 rounded text-[9px] text-white font-mono hover:bg-white/20">
+                  ব্রাউজ করুন →
+                </div>
+              </motion.button>
+
+              {/* Popular favorites for quick shortcuts toggle */}
+              <div className="flex-1 overflow-x-auto scrollbar-none flex gap-1 bg-[#0a0a0c]/80 border border-white/5 rounded-xl p-1 items-center">
+                <span className="text-[8px] font-mono font-black text-slate-500 tracking-widest uppercase pl-2 shrink-0 select-none">
+                  Favorites:
+                </span>
+                {['EUR/USD', 'GBP/USD', 'GBP/JPY', 'BTC/USD', 'GOLD', 'CRUDE'].map((fav) => (
+                  <button
+                    key={fav}
+                    type="button"
+                    onClick={() => setAsset(fav)}
+                    className={cn(
+                      "px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all shrink-0 relative overflow-hidden",
+                      asset === fav 
+                        ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/30" 
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/5 border border-transparent"
+                    )}
+                  >
+                    {fav}
+                    {asset === fav && (
+                      <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-indigo-400" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Selected Display Level indicator tag */}
+              <div className="glass-panel rounded-xl px-4 py-2 flex items-center justify-between md:justify-end gap-3 shrink-0 bg-[#0f1118]/80 border border-indigo-500/10">
+                <div className="text-left font-mono">
+                  <span className="text-[8.5px] text-zinc-500 uppercase font-black block leading-none">ACTIVE MARKET</span>
+                  <span className="text-[11px] font-black text-slate-200 uppercase mt-1 inline-block">{asset}</span>
+                </div>
+                <div className="px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  LIVE FEED
+                </div>
+              </div>
             </div>
             
             <div className="flex items-center gap-3">
@@ -1157,18 +1348,32 @@ export default function App() {
                     const finalAmount = isAiAmount ? (Math.floor(Math.random() * 400) + 100) : autoTradeAmount;
                     const calculatedLotSize = isAiAmount ? (finalAmount / 100) : lotSize;
                     
+                    const targetEntry = (signal !== 'NEUTRAL' && signalEntryPrice !== null) ? signalEntryPrice : currentPrice;
+                    const initialStatus = signal !== 'NEUTRAL' ? 'PENDING' : 'FILLED';
+
                     const newTrade: Trade = {
                       id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                       asset,
                       type,
-                      entryPrice: currentPrice,
+                      entryPrice: targetEntry,
                       stopLoss: stopLossCalc,
                       takeProfit: takeProfitCalc,
                       currentPrice,
                       amount: finalAmount,
                       maxProfit: 0,
-                      lotSize: calculatedLotSize
+                      lotSize: calculatedLotSize,
+                      status: initialStatus
                     };
+
+                    // Only deduct balance immediately if it is executing live ('FILLED' status)
+                    if (initialStatus === 'FILLED') {
+                      if (accountType === 'REAL') {
+                        setRealBalance(prev => prev - finalAmount);
+                      } else {
+                        setDemoBalance(prev => prev - finalAmount);
+                      }
+                    }
+
                     setOpenTrades(prev => [...prev, newTrade]);
                   }}
                 />
@@ -1446,11 +1651,11 @@ export default function App() {
                           const newTotal = pData.totalTrades + 1;
                           const newWins = (pData.winRate / 100 * pData.totalTrades) + (isWin ? 1 : 0);
 
-                          // Update balance
+                          // Update balance (add back trade amount + pnl since trade's amount was deducted when entered/filled)
                           if (accountType === 'REAL') {
-                            setRealBalance(prev => prev + pnl);
+                            setRealBalance(prev => prev + trade.amount + pnl);
                           } else {
-                            setDemoBalance(prev => prev + pnl);
+                            setDemoBalance(prev => prev + trade.amount + pnl);
                           }
 
                           return {
@@ -1548,6 +1753,8 @@ export default function App() {
         asset={activeNotification?.asset || ''}
         price={activeNotification?.price || 0}
         type={activeNotification?.type || 'ABOVE'}
+        customTitle={activeNotification?.customTitle}
+        customMessage={activeNotification?.customMessage}
       />
 
       <RiskManagementModal
@@ -1557,18 +1764,32 @@ export default function App() {
         balance={accountType === 'REAL' ? realBalance : demoBalance}
         accountType={accountType}
         onExecuteTrade={(params) => {
+          const targetEntry = (signal !== 'NEUTRAL' && signalEntryPrice !== null) ? signalEntryPrice : currentPrice;
+          const initialStatus = signal !== 'NEUTRAL' ? 'PENDING' : 'FILLED';
+
           const newTrade: Trade = {
             id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             asset,
             type: params.type,
-            entryPrice: currentPrice,
+            entryPrice: targetEntry,
             stopLoss: params.stopLoss,
             takeProfit: params.takeProfit,
             currentPrice,
             amount: params.amount,
             maxProfit: 0,
-            lotSize: params.lotSize
+            lotSize: params.lotSize,
+            status: initialStatus
           };
+
+          // Only deduct balance immediately if it is executing live ('FILLED' status)
+          if (initialStatus === 'FILLED') {
+            if (accountType === 'REAL') {
+              setRealBalance(prev => prev - params.amount);
+            } else {
+              setDemoBalance(prev => prev - params.amount);
+            }
+          }
+
           setOpenTrades(prev => [...prev, newTrade]);
         }}
       />
@@ -1577,6 +1798,31 @@ export default function App() {
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
         history={tradeHistory}
+      />
+
+      <PocketOptionLoginModal
+        isOpen={isPoModalOpen}
+        onClose={() => setIsPoModalOpen(false)}
+        onSuccess={handlePoSuccess}
+        initialEmail={poConnection.email}
+        initialServer={poConnection.server}
+      />
+
+      <AssetHubModal
+        isOpen={isAssetHubOpen}
+        onClose={() => setIsAssetHubOpen(false)}
+        selectedAsset={asset}
+        onSelectAsset={setAsset}
+      />
+
+      <UserProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        realBalance={realBalance}
+        demoBalance={demoBalance}
+        onResetDemoBalance={() => setDemoBalance(10000)}
+        performanceData={performanceData}
+        accountType={accountType}
       />
 
       <style>{`

@@ -61,24 +61,55 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   };
   const getSymbol = (assetName: string) => {
     const mapping: Record<string, string> = {
+      // Forex Majors
       'EUR/USD': 'FX:EURUSD',
       'GBP/USD': 'FX:GBPUSD',
       'USD/JPY': 'FX:USDJPY',
       'AUD/USD': 'FX:AUDUSD',
       'USD/CAD': 'FX:USDCAD',
-      'EUR/GBP': 'FX:EURGBP',
-      'NZD/USD': 'FX:NZDUSD',
       'USD/CHF': 'FX:USDCHF',
+      'NZD/USD': 'FX:NZDUSD',
+      // Forex Minors & Crosses
+      'EUR/GBP': 'FX:EURGBP',
       'GBP/JPY': 'FX:GBPJPY',
       'EUR/JPY': 'FX:EURJPY',
+      'AUD/JPY': 'FX:AUDJPY',
+      'CAD/JPY': 'FX:CADJPY',
+      'CHF/JPY': 'FX:CHFJPY',
+      'NZD/JPY': 'FX:NZDJPY',
+      'GBP/CHF': 'FX:GBPCHF',
+      'EUR/CHF': 'FX:EURCHF',
+      'EUR/CAD': 'FX:EURCAD',
+      'GBP/CAD': 'FX:GBPCAD',
+      'AUD/CAD': 'FX:AUDCAD',
+      'EUR/AUD': 'FX:EURAUD',
+      'GBP/AUD': 'FX:GBPAUD',
+      'AUD/NZD': 'FX:AUDNZD',
+      // Forex Exotics
+      'USD/TRY': 'FX:USDTRY',
+      'USD/MXN': 'FX:USDMXN',
+      'USD/SGD': 'FX:USDSGD',
+      'USD/ZAR': 'FX:USDZAR',
+      'USD/HKD': 'FX:USDHKD',
+      'EUR/TRY': 'FX:EURTRY',
+      'EUR/ZAR': 'FX:EURZAR',
+      // Crypto
       'BTC/USD': 'BITSTAMP:BTCUSD',
       'ETH/USD': 'BITSTAMP:ETHUSD',
       'LTC/USD': 'BITSTAMP:LTCUSD',
       'XRP/USD': 'BITSTAMP:XRPUSD',
+      'SOL/USD': 'BINANCE:SOLUSD',
+      'BNB/USD': 'BINANCE:BNBUSD',
+      'ADA/USD': 'BINANCE:ADAUSD',
+      'DOGE/USD': 'BINANCE:DOGEUSD',
+      // Commodities
       'GOLD': 'TVC:GOLD',
       'SILVER': 'TVC:SILVER',
       'BRENT': 'TVC:UKOIL',
       'CRUDE': 'TVC:USOIL',
+      'PLATINUM': 'TVC:PLATINUM',
+      'PALLADIUM': 'TVC:PALLADIUM',
+      'COPPER': 'COMEX:HG1!',
     };
     return mapping[assetName] || 'FX:EURUSD';
   };
